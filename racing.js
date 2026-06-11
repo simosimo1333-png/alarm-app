@@ -298,6 +298,16 @@
     t.lineJoin = 'round';
     t.lineCap = 'round';
 
+    // ガードレール（縁石の外側の銀色の帯）
+    tracePath(t);
+    t.strokeStyle = '#5f676e';
+    t.lineWidth = ROADW + 34;
+    t.stroke();
+    tracePath(t);
+    t.strokeStyle = '#c9d0d6';
+    t.lineWidth = ROADW + 28;
+    t.stroke();
+
     // 縁石（地色 + 白の破線）
     tracePath(t);
     t.strokeStyle = theme.curbA;
@@ -903,13 +913,42 @@
     };
   }
 
+  // ガードレール: 道路マスクの外へは出られない
+  // 戻り値 0=通常移動 1=壁ずり 2=正面衝突
+  function moveWithWalls(k, dx, dy) {
+    const nx = k.x + dx, ny = k.y + dy;
+    if (!isRoad(k.x, k.y) || isRoad(nx, ny)) {
+      // 既にコース外にいる場合は復帰できるよう自由に動かす
+      k.x = nx;
+      k.y = ny;
+      return 0;
+    }
+    if (isRoad(nx, k.y)) { k.x = nx; return 1; }
+    if (isRoad(k.x, ny)) { k.y = ny; return 1; }
+    return 2;
+  }
+
+  function hitWall(k, kind, dt) {
+    if (kind === 1) {
+      k.speed *= Math.max(0, 1 - 2 * dt); // 壁ずりで減速
+    } else if (kind === 2) {
+      const hard = Math.abs(k.speed) > 80;
+      k.speed *= -0.25; // 小さく跳ね返る
+      if (k.isPlayer && hard && k.wallT <= 0) {
+        k.wallT = 0.5;
+        beep(110, 0.2, 0.18, 'square');
+        buzz(50);
+      }
+    }
+  }
+
   function updateKart(k, dt) {
+    k.wallT = Math.max(0, (k.wallT || 0) - dt);
     if (k.spin > 0) {
       k.spin -= dt;
       k.a += dt * 10;
       k.speed *= Math.max(0, 1 - 2.5 * dt);
-      k.x += Math.cos(k.a) * k.speed * dt * 0.3;
-      k.y += Math.sin(k.a) * k.speed * dt * 0.3;
+      hitWall(k, moveWithWalls(k, Math.cos(k.a) * k.speed * dt * 0.3, Math.sin(k.a) * k.speed * dt * 0.3), dt);
       updateNearestWp(k);
       return;
     }
@@ -961,8 +1000,7 @@
     const turnMul = (course.turnMul || 1) * (onDirt ? 0.85 : 1);
     k.a += steer * TURN_RATE * turnMul * speedFactor * Math.sign(k.speed || 1) * dt;
 
-    k.x += Math.cos(k.a) * k.speed * dt;
-    k.y += Math.sin(k.a) * k.speed * dt;
+    hitWall(k, moveWithWalls(k, Math.cos(k.a) * k.speed * dt, Math.sin(k.a) * k.speed * dt), dt);
     k.x = Math.max(16, Math.min(TEX - 16, k.x));
     k.y = Math.max(16, Math.min(TEX - 16, k.y));
 
@@ -1012,8 +1050,12 @@
         if (d > 0 && d < 26) {
           const push = (26 - d) / 2;
           const nx = dx / d, ny = dy / d;
+          const ax = a.x, ay = a.y, bx = b.x, by = b.y;
           a.x -= nx * push; a.y -= ny * push;
           b.x += nx * push; b.y += ny * push;
+          // ガードレールの外へ押し出されないように
+          if (isRoad(ax, ay) && !isRoad(a.x, a.y)) { a.x = ax; a.y = ay; }
+          if (isRoad(bx, by) && !isRoad(b.x, b.y)) { b.x = bx; b.y = by; }
           a.speed *= 0.97; b.speed *= 0.97;
         }
       }
