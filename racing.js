@@ -158,12 +158,21 @@
   let ROADW = 80;
   let wps = [];          // {x, y, tx, ty} 接線つきウェイポイント
   let texData32 = null;  // Uint32Array (ABGR)
-  let roadMask = null;   // Uint8Array 1=道路
-  let dirtMask = null;   // Uint8Array 1=雪のダート（コースによる）
+  let hasDirt = false;   // 雪のダートがあるコースか
   let outA32 = 0, outB32 = 0; // テクスチャ範囲外の市松色
   let decorations = [];  // 沿道の飾り {x, y, type, size}
   let ridges = [];       // 山並み（パララックス）
   let skyGrad = null;
+  let fogGrad = null;
+
+  // オフスクリーンキャンバスとマスクは使い回す
+  // （コース切替のたびに作り直すとモバイルでメモリを圧迫してクラッシュする）
+  const texCanvas = document.createElement('canvas');
+  texCanvas.width = texCanvas.height = TEX;
+  const helperCanvas = document.createElement('canvas');
+  helperCanvas.width = helperCanvas.height = TEX;
+  const roadMask = new Uint8Array(TEX * TEX); // 1=道路
+  const dirtMask = new Uint8Array(TEX * TEX); // 1=雪のダート
 
   function abgr(hex) {
     const r = parseInt(hex.slice(1, 3), 16);
@@ -227,11 +236,9 @@
 
   // 雪のダート区間を路面の上に描き、判定マスクも作る
   function buildDirt(t) {
-    dirtMask = null;
-    if (!course.dirt) return;
-    const mc = document.createElement('canvas');
-    mc.width = mc.height = TEX;
-    const m = mc.getContext('2d');
+    hasDirt = !!course.dirt;
+    if (!hasDirt) return;
+    const m = helperCanvas.getContext('2d');
     m.fillStyle = '#000';
     m.fillRect(0, 0, TEX, TEX);
     m.lineJoin = m.lineCap = 'round';
@@ -265,14 +272,11 @@
     }
 
     const md = m.getImageData(0, 0, TEX, TEX).data;
-    dirtMask = new Uint8Array(TEX * TEX);
     for (let i = 0; i < TEX * TEX; i++) dirtMask[i] = md[i * 4] > 128 ? 1 : 0;
   }
 
   function buildTexture() {
-    const tc = document.createElement('canvas');
-    tc.width = tc.height = TEX;
-    const t = tc.getContext('2d');
+    const t = texCanvas.getContext('2d');
 
     // 地面（市松模様）
     for (let y = 0; y < TEX; y += 64) {
@@ -338,9 +342,7 @@
     outB32 = abgr(theme.grassB);
 
     // 走行マスク（縁石まで走行可）
-    const mc = document.createElement('canvas');
-    mc.width = mc.height = TEX;
-    const m = mc.getContext('2d');
+    const m = helperCanvas.getContext('2d');
     m.fillStyle = '#000';
     m.fillRect(0, 0, TEX, TEX);
     m.lineJoin = 'round';
@@ -350,7 +352,6 @@
     m.lineWidth = ROADW + 14;
     m.stroke();
     const md = m.getImageData(0, 0, TEX, TEX).data;
-    roadMask = new Uint8Array(TEX * TEX);
     for (let i = 0; i < TEX * TEX; i++) roadMask[i] = md[i * 4] > 128 ? 1 : 0;
   }
 
@@ -361,7 +362,7 @@
   }
 
   function isDirt(x, y) {
-    if (!dirtMask) return false;
+    if (!hasDirt) return false;
     const xi = x | 0, yi = y | 0;
     if (xi < 0 || yi < 0 || xi >= TEX || yi >= TEX) return false;
     return dirtMask[yi * TEX + xi] === 1;
@@ -513,6 +514,24 @@
     return c;
   }
 
+  // 絵文字は毎フレームfillTextすると巨大なフォントグリフが
+  // 大量生成されてモバイルでクラッシュするため、起動時に一度だけ描画しておく
+  function makeEmojiSprite(char, color) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 72;
+    const g = c.getContext('2d');
+    g.font = '60px serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    if (color) g.fillStyle = color;
+    g.fillText(char, 36, 40);
+    return c;
+  }
+
+  const bananaSprite = makeEmojiSprite('🍌');
+  const starSprite = makeEmojiSprite('★', '#fff');
+  const cloudSprite = makeEmojiSprite('☁️');
+
   const DECO = {
     tree:     { img: makeTreeSprite('#2e7d32', '#1b5e20', false), w: 46 },
     autumn:   { img: makeTreeSprite('#ef6c00', '#bf360c', false), w: 46 },
@@ -521,10 +540,10 @@
     machiya:  { img: makeMachiyaSprite(), w: 100 },
     onsen:    { img: makeOnsenSprite(), w: 36 },
     rock:     { img: makeRockSprite(), w: 50 },
-    cow:      { emoji: '🐄', w: 26 },
-    lantern:  { emoji: '🏮', w: 20 },
-    snowman:  { emoji: '⛄', w: 30 },
-    goat:     { emoji: '🐐', w: 24 },
+    cow:      { img: makeEmojiSprite('🐄'), w: 26 },
+    lantern:  { img: makeEmojiSprite('🏮'), w: 20 },
+    snowman:  { img: makeEmojiSprite('⛄'), w: 30 },
+    goat:     { img: makeEmojiSprite('🐐'), w: 24 },
   };
 
   function buildDecorations() {
@@ -554,6 +573,9 @@
     skyGrad = ctx.createLinearGradient(0, 0, 0, HORIZON);
     skyGrad.addColorStop(0, theme.skyTop);
     skyGrad.addColorStop(1, theme.skyBot);
+    fogGrad = ctx.createLinearGradient(0, HORIZON, 0, HORIZON + 36);
+    fogGrad.addColorStop(0, `rgba(${theme.fog},0.9)`);
+    fogGrad.addColorStop(1, `rgba(${theme.fog},0)`);
     // 山並み（飛騨山脈っぽいシルエットを2層）
     ridges = theme.ridges.map((r) => ({
       ...r,
@@ -1011,13 +1033,12 @@
     }
 
     // 視点に合わせて流れる雲
-    ctx.font = '22px serif';
     const cspan = W * 4;
     for (let i = 0; i < 6; i++) {
       const base = i * cspan / 6;
       let x = (base - heading / (Math.PI * 2) * cspan) % cspan;
       if (x < 0) x += cspan;
-      ctx.fillText('☁️', x - 30, 24 + ((i * 37) % 40));
+      ctx.drawImage(cloudSprite, x - 44, ((i * 37) % 40) - 12, 28, 28);
     }
   }
 
@@ -1039,7 +1060,8 @@
 
     for (const d of decorations) {
       const pr = project(camX, camY, dirX, dirY, d.x, d.y);
-      if (pr && pr.fz < 1100) items.push({ ...pr, type: 'deco', deco: d });
+      // 至近距離は巨大描画になるだけなのでスキップ
+      if (pr && pr.fz < 1100 && pr.fz > 22) items.push({ ...pr, type: 'deco', deco: d });
     }
     for (const box of itemBoxes) {
       if (box.respawn > 0) continue;
@@ -1063,15 +1085,8 @@
       if (it.type === 'deco') {
         const spec = DECO[it.deco.type];
         const wpx = spec.w * it.deco.size * it.scale;
-        if (spec.img) {
-          const hpx = wpx * spec.img.height / spec.img.width;
-          ctx.drawImage(spec.img, it.x - wpx / 2, it.y - hpx, wpx, hpx);
-        } else {
-          ctx.font = `${wpx}px serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'bottom';
-          ctx.fillText(spec.emoji, it.x, it.y);
-        }
+        const hpx = wpx * spec.img.height / spec.img.width;
+        ctx.drawImage(spec.img, it.x - wpx / 2, it.y - hpx, wpx, hpx);
       } else if (it.type === 'box') {
         // 至近距離では巨大化して自機に重なるのでフェードアウト
         const fade = Math.min(1, (it.fz - 30) / 50);
@@ -1088,18 +1103,11 @@
         ctx.roundRect(-s / 2, -s / 2, s, s, s * 0.18);
         ctx.fill();
         ctx.stroke();
-        ctx.fillStyle = '#fff';
-        ctx.font = `bold ${s * 0.7}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('★', 0, s * 0.05);
+        ctx.drawImage(starSprite, -s * 0.4, -s * 0.4, s * 0.8, s * 0.8);
         ctx.restore();
       } else if (it.type === 'banana') {
         const s = 20 * it.scale;
-        ctx.font = `${s}px serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText('🍌', it.x, it.y);
+        ctx.drawImage(bananaSprite, it.x - s / 2, it.y - s, s, s);
       } else {
         drawKart(it.kart, it.x, it.y, it.scale);
       }
@@ -1154,10 +1162,7 @@
   }
 
   function renderFog() {
-    const g = ctx.createLinearGradient(0, HORIZON, 0, HORIZON + 36);
-    g.addColorStop(0, `rgba(${theme.fog},0.9)`);
-    g.addColorStop(1, `rgba(${theme.fog},0)`);
-    ctx.fillStyle = g;
+    ctx.fillStyle = fogGrad;
     ctx.fillRect(0, HORIZON, W, 36);
   }
 
