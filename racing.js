@@ -1066,7 +1066,7 @@
         ctx.font = `bold ${s * 0.7}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('?', 0, s * 0.05);
+        ctx.fillText('★', 0, s * 0.05);
         ctx.restore();
       } else if (it.type === 'banana') {
         const s = 20 * it.scale;
@@ -1200,7 +1200,7 @@
     hudLap.textContent = `LAP ${Math.min(Math.max(player.lap, 1), LAPS)}/${LAPS}`;
     hudTime.textContent = fmtTime(raceTime);
     hudSpeed.textContent = `${Math.max(0, Math.round(player.speed * 0.6))} km/h`;
-    hudItem.textContent = player.item === 'boost' ? '🍄' : player.item === 'banana' ? '🍌' : '';
+    hudItem.textContent = player.item === 'boost' ? '🚀' : player.item === 'banana' ? '🍌' : '';
   }
 
   // ===== 進行管理 =====
