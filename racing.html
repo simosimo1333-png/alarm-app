@@ -30,10 +30,8 @@
 
       <div id="panel">
         <h2>🏎️ カートレース</h2>
-        <p class="panel-text">
-          3周のレースでライバル3台に勝とう！<br />
-          コース上の <span class="q">?</span> ボックスでアイテムをゲット！
-        </p>
+        <div id="course-select"></div>
+        <p class="panel-text" id="panel-text"></p>
         <button id="start-btn">スタート！</button>
         <div id="results" class="hidden"></div>
       </div>
@@ -51,7 +49,7 @@
     </div>
 
     <p class="controls-help">
-      操作: ↑/W = アクセル ・ ↓/S = ブレーキ ・ ←→/A D = ハンドル ・ スペース = アイテム使用
+      操作: ↑/W = アクセル ・ ↓/S = ブレーキ ・ ←→/A D = ハンドル ・ スペース = アイテム ・ R = コース復帰
     </p>
 
     <a class="back-link" href="index.html">← アラームに戻る</a>

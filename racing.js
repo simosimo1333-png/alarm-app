@@ -1,4 +1,4 @@
-// カートレース — モード7風の疑似3Dレーシングゲーム
+// カートレース — モード7風の疑似3Dレーシングゲーム（飛騨地域コース集）
 (() => {
   'use strict';
 
@@ -10,8 +10,6 @@
   const CAM_BACK = 70;             // 自機の何ユニット後ろから見るか
   const TEX = 1024;                // コーステクスチャの一辺
   const N_WP = 400;                // ウェイポイント数
-  const ROAD_W = 80;               // 道幅
-  const LAPS = 3;
 
   const MAX_SPEED = 270;           // units/s
   const ACCEL = 200;
@@ -34,18 +32,122 @@
   const hudItem = document.getElementById('hud-item');
   const msgEl = document.getElementById('message');
   const panel = document.getElementById('panel');
-  const panelText = panel.querySelector('.panel-text');
+  const panelText = document.getElementById('panel-text');
   const panelTitle = panel.querySelector('h2');
   const startBtn = document.getElementById('start-btn');
   const resultsEl = document.getElementById('results');
+  const courseSelEl = document.getElementById('course-select');
 
-  // ===== コース生成 =====
-  // 制御点（テクスチャ座標系のループ）
-  const CTRL = [
-    [512, 130], [780, 170], [880, 360], [820, 560], [890, 780],
-    [680, 910], [460, 850], [300, 920], [140, 770], [190, 540],
-    [120, 330], [310, 180],
+  // ===== コース定義（飛騨地域がテーマ） =====
+  const COURSES = [
+    {
+      name: '飛騨高原サーキット',
+      desc: '飛騨の高原を駆け抜ける、ゆったり基本コース。',
+      stars: 1, laps: 3, roadW: 80,
+      ctrl: [
+        [512, 130], [780, 170], [880, 360], [820, 560], [890, 780],
+        [680, 910], [460, 850], [300, 920], [140, 770], [190, 540],
+        [120, 330], [310, 180],
+      ],
+      theme: {
+        grassA: '#2e7d32', grassB: '#276b2b',
+        road: '#5b5b66', curbA: '#d32f2f', curbB: '#f5f5f5',
+        line: 'rgba(255,255,255,0.55)',
+        skyTop: '#4fc3f7', skyBot: '#c8eefb', fog: '200,238,251',
+        ridges: [
+          { color: '#9bc4d6', amp: 30, speed: 60, snow: true },
+          { color: '#5d8aa0', amp: 20, speed: 110 },
+        ],
+        deco: [['tree', 6], ['cow', 1]],
+      },
+    },
+    {
+      name: '高山 古い町並みGP',
+      desc: '城下町・高山の古い町並みを夕暮れにめぐる市街地コース。',
+      stars: 2, laps: 3, roadW: 70,
+      ctrl: [
+        [150, 150], [500, 120], [870, 150], [890, 420], [700, 470],
+        [680, 650], [880, 720], [860, 900], [520, 880], [150, 900],
+        [140, 650], [320, 560], [300, 400], [140, 380],
+      ],
+      theme: {
+        grassA: '#9c8a72', grassB: '#92805f',
+        road: '#45454d', curbA: '#b71c1c', curbB: '#eeeeee',
+        line: 'rgba(255,255,255,0.5)',
+        skyTop: '#7986cb', skyBot: '#ffcc80', fog: '255,224,178',
+        ridges: [
+          { color: '#9b8aa8', amp: 26, speed: 60 },
+          { color: '#7c6b91', amp: 18, speed: 110 },
+        ],
+        deco: [['machiya', 4], ['lantern', 2]],
+      },
+    },
+    {
+      name: '白川郷 雪のサーキット',
+      desc: '合掌造りの里・白川郷をめぐる雪道コース。ハンドルが少しすべる！',
+      stars: 2, laps: 3, roadW: 76, turnMul: 0.85,
+      ctrl: [
+        [220, 150], [560, 110], [860, 200], [900, 450], [780, 650],
+        [820, 870], [560, 920], [300, 840], [330, 650], [450, 540],
+        [330, 420], [140, 360], [130, 200],
+      ],
+      theme: {
+        grassA: '#f2f6f7', grassB: '#e3ecef',
+        road: '#62707c', curbA: '#1565c0', curbB: '#ffffff',
+        line: 'rgba(255,255,255,0.6)',
+        skyTop: '#a6cfe3', skyBot: '#f0f8fc', fog: '240,248,252',
+        ridges: [
+          { color: '#d4e3ec', amp: 32, speed: 60, snow: true },
+          { color: '#aac4d4', amp: 20, speed: 110, snow: true },
+        ],
+        deco: [['gassho', 3], ['snowtree', 3], ['snowman', 1]],
+      },
+    },
+    {
+      name: '奥飛騨 つづら折り峠',
+      desc: '紅葉の奥飛騨をのぼる、狭い道とヘアピン連続の難関峠コース。',
+      stars: 3, laps: 2, roadW: 64,
+      ctrl: [
+        [150, 140], [560, 100], [880, 160],
+        [930, 440], [870, 720], [700, 890],
+        [400, 920], [170, 850],
+        [150, 700], [560, 650], [650, 530],
+        [220, 470], [150, 350], [600, 330],
+      ],
+      theme: {
+        grassA: '#4f7a2e', grassB: '#456c28',
+        road: '#50565e', curbA: '#ef6c00', curbB: '#ffffff',
+        line: 'rgba(255,255,255,0.55)',
+        skyTop: '#5ab0e0', skyBot: '#ffe6c2', fog: '255,230,194',
+        ridges: [
+          { color: '#8c9fb0', amp: 34, speed: 60, snow: true },
+          { color: '#6d8296', amp: 22, speed: 110 },
+        ],
+        deco: [['autumn', 3], ['tree', 2], ['onsen', 1]],
+      },
+    },
   ];
+
+  // ===== コースの状態（buildCourseで構築） =====
+  let courseIdx = 0;
+  let course = COURSES[0];
+  let theme = course.theme;
+  let LAPS = 3;
+  let ROADW = 80;
+  let wps = [];          // {x, y, tx, ty} 接線つきウェイポイント
+  let texData32 = null;  // Uint32Array (ABGR)
+  let roadMask = null;   // Uint8Array 1=道路
+  let outA32 = 0, outB32 = 0; // テクスチャ範囲外の市松色
+  let decorations = [];  // 沿道の飾り {x, y, type, size}
+  let ridges = [];       // 山並み（パララックス）
+  let skyGrad = null;
+
+  function abgr(hex) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
+  }
 
   function catmullRom(p0, p1, p2, p3, t) {
     const t2 = t * t, t3 = t2 * t;
@@ -59,20 +161,22 @@
     ];
   }
 
-  const wps = []; // {x, y, tx, ty} 接線つきウェイポイント
-  {
-    const segs = CTRL.length;
-    const per = N_WP / segs;
+  function buildTrack(ctrl) {
+    wps = [];
+    const segs = ctrl.length;
+    const per = Math.floor(N_WP / segs);
     for (let s = 0; s < segs; s++) {
-      const p0 = CTRL[(s - 1 + segs) % segs];
-      const p1 = CTRL[s];
-      const p2 = CTRL[(s + 1) % segs];
-      const p3 = CTRL[(s + 2) % segs];
+      const p0 = ctrl[(s - 1 + segs) % segs];
+      const p1 = ctrl[s];
+      const p2 = ctrl[(s + 1) % segs];
+      const p3 = ctrl[(s + 2) % segs];
       for (let i = 0; i < per; i++) {
         const [x, y] = catmullRom(p0, p1, p2, p3, i / per);
         wps.push({ x, y, tx: 0, ty: 0 });
       }
     }
+    // セグメント数で割り切れない分は最後を補間して埋める
+    while (wps.length < N_WP) wps.push({ ...wps[wps.length - 1] });
     for (let i = 0; i < N_WP; i++) {
       const a = wps[(i + 1) % N_WP], b = wps[(i - 1 + N_WP) % N_WP];
       const dx = a.x - b.x, dy = a.y - b.y;
@@ -81,11 +185,6 @@
       wps[i].ty = dy / len;
     }
   }
-
-  // ===== テクスチャ（見た目）と走行マスク =====
-  let texData32;       // Uint32Array (ABGR)
-  let roadMask;        // Uint8Array 1=道路
-  const GRASS_A = 0xff2e7d32, GRASS_B = 0xff276b2b; // 範囲外用の市松グラス(ABGR)
 
   function tracePath(c) {
     c.beginPath();
@@ -99,10 +198,10 @@
     tc.width = tc.height = TEX;
     const t = tc.getContext('2d');
 
-    // 草地（市松模様）
+    // 地面（市松模様）
     for (let y = 0; y < TEX; y += 64) {
       for (let x = 0; x < TEX; x += 64) {
-        t.fillStyle = ((x ^ y) & 64) ? '#2e7d32' : '#276b2b';
+        t.fillStyle = ((x ^ y) & 64) ? theme.grassA : theme.grassB;
         t.fillRect(x, y, 64, 64);
       }
     }
@@ -110,27 +209,27 @@
     t.lineJoin = 'round';
     t.lineCap = 'round';
 
-    // 縁石（赤地 + 白の破線）
+    // 縁石（地色 + 白の破線）
     tracePath(t);
-    t.strokeStyle = '#d32f2f';
-    t.lineWidth = ROAD_W + 14;
+    t.strokeStyle = theme.curbA;
+    t.lineWidth = ROADW + 14;
     t.stroke();
     tracePath(t);
-    t.strokeStyle = '#f5f5f5';
-    t.lineWidth = ROAD_W + 14;
+    t.strokeStyle = theme.curbB;
+    t.lineWidth = ROADW + 14;
     t.setLineDash([18, 18]);
     t.stroke();
     t.setLineDash([]);
 
     // 路面
     tracePath(t);
-    t.strokeStyle = '#5b5b66';
-    t.lineWidth = ROAD_W;
+    t.strokeStyle = theme.road;
+    t.lineWidth = ROADW;
     t.stroke();
 
     // センターライン
     tracePath(t);
-    t.strokeStyle = 'rgba(255,255,255,0.55)';
+    t.strokeStyle = theme.line;
     t.lineWidth = 3;
     t.setLineDash([22, 26]);
     t.stroke();
@@ -156,6 +255,8 @@
     }
 
     texData32 = new Uint32Array(t.getImageData(0, 0, TEX, TEX).data.buffer);
+    outA32 = abgr(theme.grassA);
+    outB32 = abgr(theme.grassB);
 
     // 走行マスク（縁石まで走行可）
     const mc = document.createElement('canvas');
@@ -167,7 +268,7 @@
     m.lineCap = 'round';
     tracePath(m);
     m.strokeStyle = '#fff';
-    m.lineWidth = ROAD_W + 14;
+    m.lineWidth = ROADW + 14;
     m.stroke();
     const md = m.getImageData(0, 0, TEX, TEX).data;
     roadMask = new Uint8Array(TEX * TEX);
@@ -178,6 +279,189 @@
     const xi = x | 0, yi = y | 0;
     if (xi < 0 || yi < 0 || xi >= TEX || yi >= TEX) return false;
     return roadMask[yi * TEX + xi] === 1;
+  }
+
+  // ===== 沿道の飾りスプライト =====
+  function makeTreeSprite(top, bottom, snow) {
+    const c = document.createElement('canvas');
+    c.width = 48;
+    c.height = 64;
+    const g = c.getContext('2d');
+    g.fillStyle = '#6d4c41';
+    g.fillRect(21, 48, 6, 14);
+    g.fillStyle = bottom;
+    g.beginPath();
+    g.moveTo(24, 14); g.lineTo(4, 48); g.lineTo(44, 48);
+    g.closePath(); g.fill();
+    g.fillStyle = top;
+    g.beginPath();
+    g.moveTo(24, 2); g.lineTo(9, 30); g.lineTo(39, 30);
+    g.closePath(); g.fill();
+    if (snow) {
+      g.fillStyle = 'rgba(255,255,255,0.85)';
+      g.beginPath();
+      g.moveTo(24, 2); g.lineTo(15, 19); g.lineTo(33, 19);
+      g.closePath(); g.fill();
+    }
+    return c;
+  }
+
+  function makeGasshoSprite() {
+    // 合掌造り（雪をかぶった茅葺き屋根）
+    const c = document.createElement('canvas');
+    c.width = 120;
+    c.height = 96;
+    const g = c.getContext('2d');
+    // 壁
+    g.fillStyle = '#efebe9';
+    g.fillRect(28, 62, 64, 28);
+    g.fillStyle = '#5d4037';
+    g.fillRect(28, 62, 64, 4);
+    g.fillRect(56, 70, 10, 20);
+    // 屋根
+    g.fillStyle = '#8d6e63';
+    g.beginPath();
+    g.moveTo(60, 4); g.lineTo(8, 64); g.lineTo(112, 64);
+    g.closePath(); g.fill();
+    // 茅の筋
+    g.strokeStyle = 'rgba(93,64,55,0.6)';
+    g.lineWidth = 2;
+    for (let i = 1; i <= 4; i++) {
+      g.beginPath();
+      g.moveTo(60 - i * 11, 4 + i * 13);
+      g.lineTo(60 + i * 11, 4 + i * 13);
+      g.stroke();
+    }
+    // 屋根の雪
+    g.fillStyle = '#fff';
+    g.beginPath();
+    g.moveTo(60, 2); g.lineTo(40, 26); g.lineTo(80, 26);
+    g.closePath(); g.fill();
+    // 切妻の窓
+    g.fillStyle = '#4e342e';
+    g.fillRect(50, 36, 20, 14);
+    g.strokeStyle = '#d7ccc8';
+    g.lineWidth = 1.5;
+    g.strokeRect(50, 36, 20, 14);
+    g.beginPath();
+    g.moveTo(60, 36); g.lineTo(60, 50);
+    g.moveTo(50, 43); g.lineTo(70, 43);
+    g.stroke();
+    return c;
+  }
+
+  function makeMachiyaSprite() {
+    // 高山の町家（格子と暖簾のある木造家屋）
+    const c = document.createElement('canvas');
+    c.width = 100;
+    c.height = 80;
+    const g = c.getContext('2d');
+    // 屋根
+    g.fillStyle = '#37474f';
+    g.beginPath();
+    g.moveTo(0, 30); g.lineTo(50, 12); g.lineTo(100, 30);
+    g.lineTo(92, 38); g.lineTo(8, 38);
+    g.closePath(); g.fill();
+    // 壁（黒っぽい木造）
+    g.fillStyle = '#4e342e';
+    g.fillRect(8, 38, 84, 40);
+    // 格子窓（灯りがともる）
+    g.fillStyle = '#ffecb3';
+    g.fillRect(16, 48, 30, 22);
+    g.strokeStyle = '#3e2723';
+    g.lineWidth = 2;
+    for (let x = 20; x < 46; x += 6) {
+      g.beginPath(); g.moveTo(x, 48); g.lineTo(x, 70); g.stroke();
+    }
+    // 入口と暖簾
+    g.fillStyle = '#3e2723';
+    g.fillRect(58, 46, 26, 32);
+    g.fillStyle = '#1a237e';
+    g.fillRect(58, 46, 26, 12);
+    g.fillStyle = '#fff';
+    g.fillRect(70, 48, 2, 8);
+    return c;
+  }
+
+  function makeOnsenSprite() {
+    // 温泉の看板（奥飛騨温泉郷）
+    const c = document.createElement('canvas');
+    c.width = 44;
+    c.height = 64;
+    const g = c.getContext('2d');
+    g.fillStyle = '#795548';
+    g.fillRect(19, 30, 6, 34);
+    g.fillStyle = '#fff8e1';
+    g.beginPath();
+    g.roundRect(4, 2, 36, 30, 5);
+    g.fill();
+    g.strokeStyle = '#6d4c41';
+    g.lineWidth = 2;
+    g.stroke();
+    g.fillStyle = '#e53935';
+    g.font = 'bold 22px serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('♨', 22, 18);
+    return c;
+  }
+
+  const DECO = {
+    tree:     { img: makeTreeSprite('#2e7d32', '#1b5e20', false), w: 46 },
+    autumn:   { img: makeTreeSprite('#ef6c00', '#bf360c', false), w: 46 },
+    snowtree: { img: makeTreeSprite('#2e7d32', '#1b5e20', true), w: 46 },
+    gassho:   { img: makeGasshoSprite(), w: 120 },
+    machiya:  { img: makeMachiyaSprite(), w: 100 },
+    onsen:    { img: makeOnsenSprite(), w: 36 },
+    cow:      { emoji: '🐄', w: 26 },
+    lantern:  { emoji: '🏮', w: 20 },
+    snowman:  { emoji: '⛄', w: 30 },
+  };
+
+  function buildDecorations() {
+    decorations = [];
+    // 出現テーブル（重みつき）
+    const table = [];
+    for (const [type, weight] of theme.deco) {
+      for (let i = 0; i < weight; i++) table.push(type);
+    }
+    for (let i = 4; i < N_WP; i += 6) {
+      if (Math.random() < 0.45) continue;
+      const type = table[(Math.random() * table.length) | 0];
+      const big = DECO[type].w >= 90;
+      const w = wps[i];
+      const rx = -w.ty, ry = w.tx;
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const lat = side * (ROADW / 2 + 34 + (big ? 30 : 0) + Math.random() * 55);
+      const x = w.x + rx * lat;
+      const y = w.y + ry * lat;
+      if (x < 30 || y < 30 || x > TEX - 30 || y > TEX - 30) continue;
+      if (isRoad(x, y)) continue;
+      decorations.push({ x, y, type, size: 0.85 + Math.random() * 0.45 });
+    }
+  }
+
+  function buildSky() {
+    skyGrad = ctx.createLinearGradient(0, 0, 0, HORIZON);
+    skyGrad.addColorStop(0, theme.skyTop);
+    skyGrad.addColorStop(1, theme.skyBot);
+    // 山並み（飛騨山脈っぽいシルエットを2層）
+    ridges = theme.ridges.map((r) => ({
+      ...r,
+      peaks: Array.from({ length: 24 }, () => 0.35 + Math.random() * 0.65),
+    }));
+  }
+
+  function buildCourse(idx) {
+    courseIdx = idx;
+    course = COURSES[idx];
+    theme = course.theme;
+    ROADW = course.roadW || 80;
+    LAPS = course.laps || 3;
+    buildTrack(course.ctrl);
+    buildTexture();
+    buildDecorations();
+    buildSky();
   }
 
   // ===== カートスプライト（後ろ姿） =====
@@ -250,6 +534,7 @@
     const k = KEYMAP[e.key];
     if (k) { input[k] = true; e.preventDefault(); }
     if (e.key === ' ') { itemPressed = true; e.preventDefault(); }
+    if ((e.key === 'r' || e.key === 'R') && state === 'race') respawnPlayer();
   });
   window.addEventListener('keyup', (e) => {
     const k = KEYMAP[e.key];
@@ -329,10 +614,20 @@
     for (let i = 50; i < N_WP; i += 100) {
       const w = wps[i];
       const rx = -w.ty, ry = w.tx;
-      for (const off of [-24, 0, 24]) {
+      for (const off of [-22, 0, 22]) {
         itemBoxes.push({ x: w.x + rx * off, y: w.y + ry * off, respawn: 0 });
       }
     }
+  }
+
+  function respawnPlayer() {
+    // コースに復帰（Rキー）
+    const w = wps[player.wp];
+    player.x = w.x;
+    player.y = w.y;
+    player.a = Math.atan2(w.ty, w.tx);
+    player.speed = 0;
+    player.spin = 0;
   }
 
   // ===== 物理・進行 =====
@@ -420,7 +715,8 @@
     if (!gas && !brake && Math.abs(k.speed) < 4) k.speed = 0;
 
     const speedFactor = Math.min(1, Math.abs(k.speed) / (MAX_SPEED * 0.45));
-    k.a += steer * TURN_RATE * speedFactor * Math.sign(k.speed || 1) * dt;
+    const turnMul = course.turnMul || 1;
+    k.a += steer * TURN_RATE * turnMul * speedFactor * Math.sign(k.speed || 1) * dt;
 
     k.x += Math.cos(k.a) * k.speed * dt;
     k.y += Math.sin(k.a) * k.speed * dt;
@@ -525,7 +821,7 @@
         if (txi >= 0 && tyi >= 0 && txi < TEX && tyi < TEX) {
           ground32[p++] = texData32[tyi * TEX + txi];
         } else {
-          ground32[p++] = (((txi >> 6) ^ (tyi >> 6)) & 1) ? GRASS_A : GRASS_B;
+          ground32[p++] = (((txi >> 6) ^ (tyi >> 6)) & 1) ? outA32 : outB32;
         }
         wx += sx;
         wy += sy;
@@ -535,19 +831,56 @@
   }
 
   function renderSky(heading) {
-    const g = ctx.createLinearGradient(0, 0, 0, HORIZON);
-    g.addColorStop(0, '#4fc3f7');
-    g.addColorStop(1, '#c8eefb');
-    ctx.fillStyle = g;
+    ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, W, HORIZON);
+
+    // 山並み（パララックスつき）
+    const span = 1920, segW = 80;
+    for (const r of ridges) {
+      let offset = (heading * r.speed) % span;
+      if (offset < 0) offset += span;
+      ctx.fillStyle = r.color;
+      ctx.beginPath();
+      ctx.moveTo(0, HORIZON);
+      for (let x = 0; x <= W; x += 8) {
+        const pan = (x + offset) % span;
+        const i = (pan / segW) | 0;
+        const f = (pan % segW) / segW;
+        const hA = r.peaks[i % 24], hB = r.peaks[(i + 1) % 24];
+        const hv = hA + (hB - hA) * f;
+        ctx.lineTo(x, HORIZON - r.amp * hv);
+      }
+      ctx.lineTo(W, HORIZON);
+      ctx.closePath();
+      ctx.fill();
+      // 雪をかぶった頂
+      if (r.snow) {
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        for (let i = 0; i < 24; i++) {
+          let px = i * segW - offset;
+          while (px < -segW) px += span;
+          while (px > span - segW) px -= span;
+          if (px < -20 || px > W + 20) continue;
+          const py = HORIZON - r.amp * r.peaks[i];
+          const cap = r.amp * r.peaks[i] * 0.32;
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(px - cap * 0.8, py + cap);
+          ctx.lineTo(px + cap * 0.8, py + cap);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
     // 視点に合わせて流れる雲
     ctx.font = '22px serif';
-    const span = W * 4;
+    const cspan = W * 4;
     for (let i = 0; i < 6; i++) {
-      const base = i * span / 6;
-      let x = (base - heading / (Math.PI * 2) * span) % span;
-      if (x < 0) x += span;
-      ctx.fillText('☁️', x - 30, 28 + ((i * 37) % 50));
+      const base = i * cspan / 6;
+      let x = (base - heading / (Math.PI * 2) * cspan) % cspan;
+      if (x < 0) x += cspan;
+      ctx.fillText('☁️', x - 30, 24 + ((i * 37) % 40));
     }
   }
 
@@ -567,6 +900,10 @@
   function renderSprites(camX, camY, dirX, dirY) {
     const items = [];
 
+    for (const d of decorations) {
+      const pr = project(camX, camY, dirX, dirY, d.x, d.y);
+      if (pr && pr.fz < 1100) items.push({ ...pr, type: 'deco', deco: d });
+    }
     for (const box of itemBoxes) {
       if (box.respawn > 0) continue;
       const pr = project(camX, camY, dirX, dirY, box.x, box.y);
@@ -585,8 +922,20 @@
     items.sort((a, b) => b.fz - a.fz); // 遠い順に描画
 
     for (const it of items) {
-      if (it.x < -80 || it.x > W + 80) continue;
-      if (it.type === 'box') {
+      if (it.x < -100 || it.x > W + 100) continue;
+      if (it.type === 'deco') {
+        const spec = DECO[it.deco.type];
+        const wpx = spec.w * it.deco.size * it.scale;
+        if (spec.img) {
+          const hpx = wpx * spec.img.height / spec.img.width;
+          ctx.drawImage(spec.img, it.x - wpx / 2, it.y - hpx, wpx, hpx);
+        } else {
+          ctx.font = `${wpx}px serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(spec.emoji, it.x, it.y);
+        }
+      } else if (it.type === 'box') {
         const s = 26 * it.scale;
         const bob = Math.sin(performance.now() / 250 + it.fz) * s * 0.08;
         ctx.save();
@@ -652,8 +1001,8 @@
 
   function renderFog() {
     const g = ctx.createLinearGradient(0, HORIZON, 0, HORIZON + 36);
-    g.addColorStop(0, 'rgba(200,238,251,0.9)');
-    g.addColorStop(1, 'rgba(200,238,251,0)');
+    g.addColorStop(0, `rgba(${theme.fog},0.9)`);
+    g.addColorStop(1, `rgba(${theme.fog},0)`);
     ctx.fillStyle = g;
     ctx.fillRect(0, HORIZON, W, 36);
   }
@@ -742,7 +1091,7 @@
     msgEl.textContent = '';
     const { rank, sorted } = rankOf(player);
     panelTitle.textContent = rank === 1 ? '🏆 優勝！' : `${rank}位でゴール！`;
-    panelText.textContent = `タイム: ${fmtTime(playerFinishTime)}`;
+    panelText.innerHTML = `${course.name}<br>タイム: ${fmtTime(playerFinishTime)}`;
     const medals = ['🥇', '🥈', '🥉', '4.'];
     resultsEl.innerHTML = sorted
       .map((k, i) => `<div class="${k.isPlayer ? 'me' : ''}">${medals[i]} ${k.name}</div>`)
@@ -762,6 +1111,27 @@
     countT = 3.5;
   }
   startBtn.addEventListener('click', startRace);
+
+  // ===== コース選択UI =====
+  const courseBtns = COURSES.map((c, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'course-btn';
+    btn.innerHTML = `${c.name}<span>${'★'.repeat(c.stars)}${'☆'.repeat(3 - c.stars)} ・ ${c.laps}周</span>`;
+    btn.addEventListener('click', () => selectCourse(i));
+    courseSelEl.appendChild(btn);
+    return btn;
+  });
+
+  function selectCourse(i) {
+    buildCourse(i);
+    resetRace();
+    courseBtns.forEach((b, j) => b.classList.toggle('selected', j === i));
+    panelTitle.textContent = '🏎️ カートレース';
+    panelText.innerHTML = course.desc;
+    resultsEl.classList.add('hidden');
+    startBtn.textContent = 'スタート！';
+    render(); // 背景プレビューを更新
+  }
 
   // ===== メインループ =====
   let lastTime = performance.now();
@@ -799,8 +1169,6 @@
   }
 
   // ===== 初期化 =====
-  buildTexture();
-  resetRace();
-  render(); // タイトル背景として1フレーム描画
+  selectCourse(0);
   requestAnimationFrame(loop);
 })();

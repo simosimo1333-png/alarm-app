@@ -140,8 +140,45 @@ h1 {
 }
 
 #panel h2 {
-  font-size: 1.7rem;
+  font-size: 1.5rem;
   letter-spacing: 2px;
+}
+
+/* ---- コース選択 ---- */
+#course-select {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: min(420px, 86%);
+}
+
+.course-btn {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.course-btn span {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  font-weight: normal;
+  color: #ffd54a;
+}
+
+.course-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.course-btn.selected {
+  border-color: #e94560;
+  background: rgba(233, 69, 96, 0.3);
 }
 
 .panel-text {
