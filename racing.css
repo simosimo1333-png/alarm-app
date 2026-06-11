@@ -223,6 +223,66 @@ h1 {
   transform: scale(1.05);
 }
 
+/* ---- ふたりで対戦 ---- */
+#vs-btn {
+  padding: 8px 20px;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+#vs-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+#vs-menu {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.vs-mini {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: none;
+  background: #e94560;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.vs-or {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+#vs-code {
+  width: 86px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 1rem;
+  text-align: center;
+  letter-spacing: 2px;
+  outline: none;
+}
+
+#vs-status {
+  width: 100%;
+  font-size: 0.85rem;
+  color: #ffd54a;
+  min-height: 1.2em;
+}
+
 #results {
   font-size: 1.05rem;
   line-height: 2;

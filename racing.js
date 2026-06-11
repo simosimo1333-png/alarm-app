@@ -43,7 +43,7 @@
     {
       name: '飛騨高原サーキット',
       desc: '飛騨の高原を駆け抜ける、ゆったり基本コース。',
-      stars: 1, laps: 3, roadW: 80,
+      stars: 1, laps: 3, roadW: 104,
       ctrl: [
         [512, 130], [780, 170], [880, 360], [820, 560], [890, 780],
         [680, 910], [460, 850], [300, 920], [140, 770], [190, 540],
@@ -64,7 +64,7 @@
     {
       name: '高山 古い町並みGP',
       desc: '城下町・高山の古い町並みを夕暮れにめぐる市街地コース。',
-      stars: 2, laps: 3, roadW: 70,
+      stars: 2, laps: 3, roadW: 92,
       ctrl: [
         [150, 150], [500, 120], [870, 150], [890, 420], [700, 470],
         [680, 650], [880, 720], [860, 900], [520, 880], [150, 900],
@@ -85,12 +85,12 @@
     {
       name: '白川郷 雪のサーキット',
       desc: '合掌造りの里・白川郷をめぐる雪道コース。ところどころ雪のダートですべる！',
-      stars: 2, laps: 3, roadW: 76, turnMul: 0.85,
+      stars: 2, laps: 3, roadW: 100, turnMul: 0.85,
       dirt: { sections: 6, len: 9, mul: 0.68 },
       ctrl: [
         [220, 150], [560, 110], [860, 200], [900, 450], [780, 650],
-        [820, 870], [560, 920], [300, 840], [330, 650], [450, 540],
-        [330, 420], [140, 360], [130, 200],
+        [820, 870], [560, 920], [300, 840], [330, 680], [450, 540],
+        [330, 400], [140, 360], [130, 200],
       ],
       theme: {
         grassA: '#f2f6f7', grassB: '#e3ecef',
@@ -107,7 +107,7 @@
     {
       name: '乗鞍スカイライン',
       desc: '雲の上を走る天空の山岳道路。ながれるような高速コーナーが続く。',
-      stars: 2, laps: 3, roadW: 72,
+      stars: 2, laps: 3, roadW: 96,
       ctrl: [
         [200, 140], [520, 100], [840, 160], [920, 400], [800, 560],
         [880, 760], [680, 910], [420, 820], [240, 900], [120, 720],
@@ -128,7 +128,7 @@
     {
       name: '奥飛騨 つづら折り峠',
       desc: '紅葉の奥飛騨をのぼる、狭い道とヘアピン連続の難関峠コース。',
-      stars: 3, laps: 2, roadW: 64,
+      stars: 3, laps: 2, roadW: 80,
       ctrl: [
         [150, 140], [560, 100], [880, 160],
         [930, 440], [870, 720], [700, 890],
@@ -179,6 +179,15 @@
     const g = parseInt(hex.slice(3, 5), 16);
     const b = parseInt(hex.slice(5, 7), 16);
     return (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
+  }
+
+  // シード付き乱数（対戦時に両者のダート・飾り配置を一致させるため）
+  let rngState = 1;
+  let courseSeed = 1;
+  function srand(s) { rngState = s >>> 0 || 1; }
+  function rnd() {
+    rngState = (rngState * 1664525 + 1013904223) >>> 0;
+    return rngState / 4294967296;
   }
 
   function catmullRom(p0, p1, p2, p3, t) {
@@ -249,8 +258,8 @@
     const n = course.dirt.sections;
     for (let s = 0; s < n; s++) {
       // スタートライン付近（wp 0 前後）は避けて配置
-      const start = Math.floor(30 + (s * (N_WP - 70)) / n + Math.random() * 14);
-      const len = course.dirt.len + Math.floor(Math.random() * 5);
+      const start = Math.floor(30 + (s * (N_WP - 70)) / n + rnd() * 14);
+      const len = course.dirt.len + Math.floor(rnd() * 5);
 
       traceSegment(t, start, len);
       t.strokeStyle = '#edf3f6';
@@ -258,12 +267,12 @@
       t.stroke();
       // 雪の質感（薄い影のまだら）
       for (let j = 0; j < 40; j++) {
-        const w = wps[(start + Math.floor(Math.random() * len)) % N_WP];
+        const w = wps[(start + Math.floor(rnd() * len)) % N_WP];
         const rx = -w.ty, ry = w.tx;
-        const lat = (Math.random() - 0.5) * (ROADW - 18);
+        const lat = (rnd() - 0.5) * (ROADW - 18);
         t.fillStyle = 'rgba(160,180,190,0.5)';
         t.beginPath();
-        t.arc(w.x + rx * lat, w.y + ry * lat, 1 + Math.random() * 2.5, 0, Math.PI * 2);
+        t.arc(w.x + rx * lat, w.y + ry * lat, 1 + rnd() * 2.5, 0, Math.PI * 2);
         t.fill();
       }
 
@@ -554,18 +563,18 @@
       for (let i = 0; i < weight; i++) table.push(type);
     }
     for (let i = 4; i < N_WP; i += 6) {
-      if (Math.random() < 0.45) continue;
-      const type = table[(Math.random() * table.length) | 0];
+      if (rnd() < 0.45) continue;
+      const type = table[(rnd() * table.length) | 0];
       const big = DECO[type].w >= 90;
       const w = wps[i];
       const rx = -w.ty, ry = w.tx;
-      const side = Math.random() < 0.5 ? -1 : 1;
-      const lat = side * (ROADW / 2 + 34 + (big ? 30 : 0) + Math.random() * 55);
+      const side = rnd() < 0.5 ? -1 : 1;
+      const lat = side * (ROADW / 2 + 34 + (big ? 30 : 0) + rnd() * 55);
       const x = w.x + rx * lat;
       const y = w.y + ry * lat;
       if (x < 30 || y < 30 || x > TEX - 30 || y > TEX - 30) continue;
       if (isRoad(x, y)) continue;
-      decorations.push({ x, y, type, size: 0.85 + Math.random() * 0.45 });
+      decorations.push({ x, y, type, size: 0.85 + rnd() * 0.45 });
     }
   }
 
@@ -583,12 +592,14 @@
     }));
   }
 
-  function buildCourse(idx) {
+  function buildCourse(idx, seed) {
     courseIdx = idx;
     course = COURSES[idx];
     theme = course.theme;
     ROADW = course.roadW || 80;
     LAPS = course.laps || 3;
+    courseSeed = seed !== undefined ? seed : ((Math.random() * 0xffffffff) >>> 0);
+    srand(courseSeed);
     buildTrack(course.ctrl);
     buildTexture();
     buildDecorations();
@@ -798,25 +809,37 @@
     };
   }
 
-  function resetRace() {
+  function resetRace(vs) {
     karts = [];
     bananas = [];
     finishOrder = [];
     raceTime = 0;
     steerSmooth = 0;
+    remoteTarget = null;
+    remoteFinish = null;
 
     const grid = N_WP - 8;
-    karts.push(spawnKart(CPU_DEFS[0], grid + 4, -22, false));
-    karts.push(spawnKart(CPU_DEFS[1], grid + 4, 22, false));
-    karts.push(spawnKart(CPU_DEFS[2], grid, -22, false));
-    player = spawnKart({ name: 'あなた', body: '#e94560', helmet: '#fff' }, grid, 22, true);
-    karts.push(player);
+    if (vs) {
+      // 対戦: 自分と相手の2台。ホストが左、ゲストが右
+      const myLat = netRole === 'host' ? -22 : 22;
+      remoteKart = spawnKart({ name: 'あいて', body: '#1e88e5', helmet: '#fff' }, grid, -myLat, false);
+      remoteKart.remote = true;
+      player = spawnKart({ name: 'あなた', body: '#e94560', helmet: '#fff' }, grid, myLat, true);
+      karts.push(remoteKart, player);
+    } else {
+      remoteKart = null;
+      karts.push(spawnKart(CPU_DEFS[0], grid + 4, -22, false));
+      karts.push(spawnKart(CPU_DEFS[1], grid + 4, 22, false));
+      karts.push(spawnKart(CPU_DEFS[2], grid, -22, false));
+      player = spawnKart({ name: 'あなた', body: '#e94560', helmet: '#fff' }, grid, 22, true);
+      karts.push(player);
+    }
 
     itemBoxes = [];
     for (let i = 50; i < N_WP; i += 100) {
       const w = wps[i];
       const rx = -w.ty, ry = w.tx;
-      for (const off of [-22, 0, 22]) {
+      for (const off of [-ROADW * 0.3, 0, ROADW * 0.3]) {
         itemBoxes.push({ x: w.x + rx * off, y: w.y + ry * off, respawn: 0 });
       }
     }
@@ -959,18 +982,26 @@
       k.boost = 1.6;
       if (k.isPlayer) beep(880, 0.3, 0.12, 'sawtooth');
     } else if (k.item === 'banana') {
-      bananas.push({
+      const bn = {
         x: k.x - Math.cos(k.a) * 42,
         y: k.y - Math.sin(k.a) * 42,
         arm: 0.6,
-      });
-      if (k.isPlayer) beep(330, 0.15);
+        id: k.isPlayer && vsMode ? `${netRole}-${++netBananaSeq}` : null,
+      };
+      bananas.push(bn);
+      if (k.isPlayer) {
+        beep(330, 0.15);
+        if (bn.id) netSend({ t: 'banana', x: bn.x, y: bn.y, id: bn.id });
+      }
     }
     k.item = null;
   }
 
   function updateWorld(dt) {
-    for (const k of karts) updateKart(k, dt);
+    for (const k of karts) {
+      if (k.remote) { lerpRemote(k, dt); continue; }
+      updateKart(k, dt);
+    }
 
     // カート同士の押し合い
     for (let i = 0; i < karts.length; i++) {
@@ -988,37 +1019,58 @@
       }
     }
 
-    // アイテムボックス
+    // アイテムボックス（相手の取得は'box'メッセージで同期）
     for (const box of itemBoxes) {
       if (box.respawn > 0) { box.respawn -= dt; continue; }
       for (const k of karts) {
-        if (k.item || k.finished) continue;
+        if (k.remote || k.item || k.finished) continue;
         if (Math.hypot(k.x - box.x, k.y - box.y) < 22) {
           k.item = Math.random() < 0.6 ? 'boost' : 'banana';
           k.aiItemT = 1.5 + Math.random() * 3;
           box.respawn = 4;
-          if (k.isPlayer) { beep(660, 0.12, 0.1, 'triangle'); buzz(20); }
+          if (k.isPlayer) {
+            beep(660, 0.12, 0.1, 'triangle');
+            buzz(20);
+            netSend({ t: 'box', i: itemBoxes.indexOf(box) });
+          }
           break;
         }
       }
     }
 
-    // バナナ
+    // バナナ（相手のヒット判定は相手側が行い'bhit'で同期）
     for (let i = bananas.length - 1; i >= 0; i--) {
       const bn = bananas[i];
       bn.arm -= dt;
       if (bn.arm > 0) continue;
       for (const k of karts) {
-        if (k.spin > 0) continue;
+        if (k.remote || k.spin > 0) continue;
         if (Math.hypot(k.x - bn.x, k.y - bn.y) < 20) {
           k.spin = 1;
           k.speed *= 0.25;
+          if (bn.id) netSend({ t: 'bhit', id: bn.id });
           bananas.splice(i, 1);
           if (k.isPlayer) { beep(180, 0.4, 0.15, 'sawtooth'); buzz([60, 50, 60]); }
           break;
         }
       }
     }
+  }
+
+  // 相手カートは受信した状態へなめらかに補間
+  function lerpRemote(k, dt) {
+    if (remoteTarget) {
+      const f = Math.min(1, dt * 10);
+      k.x += (remoteTarget.x - k.x) * f;
+      k.y += (remoteTarget.y - k.y) * f;
+      let da = remoteTarget.a - k.a;
+      while (da > Math.PI) da -= Math.PI * 2;
+      while (da < -Math.PI) da += Math.PI * 2;
+      k.a += da * f;
+      k.speed = remoteTarget.sp;
+    }
+    k.boost = Math.max(0, k.boost - dt);
+    k.spin = Math.max(0, k.spin - dt);
   }
 
   // ===== レンダリング =====
@@ -1306,6 +1358,7 @@
     playerFinishTime = raceTime;
     state = 'finished';
     msgEl.textContent = 'FINISH!';
+    netSend({ t: 'fin', time: playerFinishTime });
     buzz(120);
     beep(660, 0.2);
     setTimeout(() => beep(880, 0.4), 200);
@@ -1329,13 +1382,210 @@
   function startRace() {
     initAudio();
     if (actx && actx.state === 'suspended') actx.resume();
-    resetRace();
+    leaveNet();
+    resetRace(false);
     panel.classList.add('hidden');
     hud.classList.remove('hidden');
     state = 'count';
     countT = 3.5;
   }
   startBtn.addEventListener('click', startRace);
+
+  // ===== ふたりで対戦（ルームコードでP2P接続） =====
+  // 通常は PeerJS（WebRTC）。?local=1 で同一ブラウザのタブ同士
+  // （BroadcastChannel）に切り替わる（動作確認用・同じ端末の2窓対戦にも使える）
+  const LOCAL_NET = new URLSearchParams(location.search).has('local');
+  let net = null;          // {send, close}
+  let netRole = null;      // 'host' | 'guest'
+  let vsMode = false;
+  let remoteKart = null;
+  let remoteTarget = null; // 相手の最新状態
+  let remoteFinish = null;
+  let netBananaSeq = 0;
+  let lastNetSend = 0;
+  let roomCode = null;
+
+  const vsMenu = document.getElementById('vs-menu');
+  const vsStatusEl = document.getElementById('vs-status');
+  const vsCodeInput = document.getElementById('vs-code');
+  function vsStatus(msg) { vsStatusEl.textContent = msg; }
+
+  function netSend(obj) {
+    if (vsMode && net) {
+      try { net.send(obj); } catch (e) { /* 切断間際は無視 */ }
+    }
+  }
+
+  function leaveNet() {
+    if (net) {
+      try { net.send({ t: 'bye' }); } catch (e) { /* 切断済みなら無視 */ }
+      try { net.close(); } catch (e) { /* 同上 */ }
+    }
+    net = null;
+    netRole = null;
+    vsMode = false;
+    roomCode = null;
+    vsStatus('');
+  }
+
+  function loadPeerJs() {
+    if (window.Peer) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  function openLocal(role, code, cbs) {
+    const bc = new BroadcastChannel('hida-kart-' + code);
+    const conn = {
+      send: (o) => bc.postMessage({ ...o, _r: role }),
+      close: () => bc.close(),
+    };
+    bc.onmessage = (ev) => {
+      if (ev.data && ev.data._r !== role) cbs.onMsg(ev.data);
+    };
+    setTimeout(() => cbs.onOpen(conn), 30);
+  }
+
+  function openPeer(role, code, cbs) {
+    loadPeerJs().then(() => {
+      const id = 'hida-kart-' + code;
+      const peer = new Peer(role === 'host' ? id : undefined);
+      const wire = (c) => {
+        c.on('open', () => cbs.onOpen({
+          send: (o) => c.send(o),
+          close: () => { try { c.close(); } catch (e) {} try { peer.destroy(); } catch (e) {} },
+        }));
+        c.on('data', cbs.onMsg);
+        c.on('close', cbs.onClose);
+      };
+      peer.on('error', (e) => {
+        if (e.type === 'peer-unavailable') vsStatus('そのコードのルームが見つかりません');
+        else if (e.type === 'unavailable-id') vsStatus('コードが使用中です。もう一度作成してください');
+        else vsStatus('接続エラーが発生しました（' + e.type + '）');
+      });
+      if (role === 'host') {
+        peer.on('connection', wire);
+      } else {
+        peer.on('open', () => wire(peer.connect(id, { reliable: false })));
+      }
+    }).catch(() => vsStatus('通信ライブラリを読み込めませんでした'));
+  }
+
+  function startNet(role) {
+    leaveNet();
+    netRole = role;
+    const code = role === 'host'
+      ? String(1000 + Math.floor(Math.random() * 9000))
+      : vsCodeInput.value.trim();
+    if (!/^\d{4}$/.test(code)) { vsStatus('4けたのコードを入力してね'); return; }
+    roomCode = code;
+    vsStatus(role === 'host'
+      ? `コード「${code}」を友だちに伝えてね。参加を待っています…`
+      : '接続中…');
+    const cbs = {
+      onOpen: (conn) => {
+        net = conn;
+        if (role === 'guest') net.send({ t: 'join' });
+      },
+      onMsg: onNetMsg,
+      onClose: onNetClosed,
+    };
+    (LOCAL_NET ? openLocal : openPeer)(role, code, cbs);
+  }
+
+  function onNetMsg(m) {
+    if (!m || !m.t) return;
+    if (m.t === 'join' && netRole === 'host' && !vsMode) {
+      netSendRaw({ t: 'start', course: courseIdx, seed: courseSeed });
+      beginVersus();
+    } else if (m.t === 'start' && netRole === 'guest' && !vsMode) {
+      buildCourse(m.course, m.seed);
+      courseBtns.forEach((b, j) => b.classList.toggle('selected', j === m.course));
+      beginVersus();
+    } else if (m.t === 's' && remoteKart) {
+      remoteTarget = m;
+      remoteKart.wp = m.wp;
+      remoteKart.lap = m.lap;
+      if (m.b) remoteKart.boost = 0.2;
+      if (m.n) remoteKart.spin = 0.2;
+      if (m.lap > LAPS && !remoteKart.finished) {
+        remoteKart.finished = true;
+        finishOrder.push(remoteKart);
+      }
+    } else if (m.t === 'banana') {
+      bananas.push({ x: m.x, y: m.y, arm: 0.6, id: m.id });
+    } else if (m.t === 'bhit') {
+      const i = bananas.findIndex((b) => b.id === m.id);
+      if (i >= 0) bananas.splice(i, 1);
+    } else if (m.t === 'box') {
+      if (itemBoxes[m.i]) itemBoxes[m.i].respawn = 4;
+    } else if (m.t === 'fin') {
+      remoteFinish = m.time;
+    } else if (m.t === 'bye') {
+      onNetClosed();
+    }
+  }
+
+  // vsMode確定前（start送信時）にも使う生送信
+  function netSendRaw(obj) {
+    if (net) { try { net.send(obj); } catch (e) { /* 無視 */ } }
+  }
+
+  function beginVersus() {
+    initAudio();
+    if (actx && actx.state === 'suspended') actx.resume();
+    vsMode = true;
+    resetRace(true);
+    panel.classList.add('hidden');
+    hud.classList.remove('hidden');
+    vsMenu.classList.add('hidden');
+    state = 'count';
+    countT = 3.5;
+  }
+
+  function onNetClosed() {
+    if (!net) return;
+    const wasRacing = vsMode && state !== 'title';
+    net = null;
+    leaveNet();
+    if (wasRacing) {
+      msgEl.textContent = '相手との接続が切れました';
+      setTimeout(() => {
+        msgEl.textContent = '';
+        state = 'title';
+        hud.classList.add('hidden');
+        panel.classList.remove('hidden');
+        selectCourse(courseIdx);
+      }, 2000);
+    } else {
+      vsStatus('接続が切れました');
+    }
+  }
+
+  function netTick(now) {
+    if (!vsMode || !net || !player) return;
+    if (now - lastNetSend < 66) return; // 約15Hz
+    lastNetSend = now;
+    netSend({
+      t: 's',
+      x: player.x, y: player.y, a: player.a, sp: player.speed,
+      wp: player.wp, lap: player.lap,
+      b: player.boost > 0 ? 1 : 0,
+      n: player.spin > 0 ? 1 : 0,
+    });
+  }
+
+  document.getElementById('vs-btn').addEventListener('click', () => {
+    initAudio();
+    vsMenu.classList.toggle('hidden');
+  });
+  document.getElementById('vs-host').addEventListener('click', () => startNet('host'));
+  document.getElementById('vs-join').addEventListener('click', () => startNet('guest'));
 
   // ===== コース選択UI =====
   const courseBtns = COURSES.map((c, i) => {
@@ -1383,6 +1633,7 @@
     if (state === 'race' || state === 'finished') {
       if (!player.finished) raceTime += dt;
       updateWorld(dt);
+      netTick(now);
     }
 
     if (state !== 'title') {
@@ -1400,6 +1651,10 @@
   // 検証用に最低限の状態を公開
   window.__kart = {
     get player() { return player; },
+    get karts() { return karts; },
+    get room() { return roomCode; },
+    get state() { return state; },
+    texURL: () => texCanvas.toDataURL(),
     isDirt, isRoad,
   };
 })();
