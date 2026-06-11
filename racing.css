@@ -133,10 +133,18 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 14px;
+  padding: 14px 0;
+  overflow-y: auto;
   background: rgba(10, 10, 25, 0.78);
   backdrop-filter: blur(4px);
+}
+
+#panel::before,
+#panel::after {
+  content: '';
+  margin: auto; /* 収まるときは中央寄せ、あふれたらスクロール */
 }
 
 #panel h2 {
@@ -221,44 +229,196 @@ h1 {
   font-weight: bold;
 }
 
-/* ---- タッチ操作 ---- */
+/* ---- タッチ操作（ゲーム画面の下の操作バー） ---- */
 #touch-controls {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 8px;
   display: none;
   justify-content: space-between;
-  padding: 0 10px;
-  pointer-events: none;
-}
-
-@media (hover: none) and (pointer: coarse) {
-  #touch-controls {
-    display: flex;
-  }
+  align-items: center;
+  gap: 10px;
+  margin: 12px auto 0;
 }
 
 .tc-group {
   display: flex;
-  gap: 10px;
-  pointer-events: auto;
+  gap: 12px;
 }
 
 .tc-btn {
-  width: 58px;
-  height: 58px;
+  width: 74px;
+  height: 74px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.5);
-  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.1);
   color: #fff;
-  font-size: 1.3rem;
+  font-size: 1.7rem;
   font-weight: bold;
   touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tc-btn:active {
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(0.94);
 }
 
 .tc-gas {
-  background: rgba(233, 69, 96, 0.55);
+  width: 110px;
+  border-radius: 38px;
+  background: rgba(233, 69, 96, 0.6);
+  font-size: 1.3rem;
+  letter-spacing: 1px;
+}
+
+.tc-gas:active {
+  background: rgba(233, 69, 96, 0.95);
+}
+
+.tc-small {
+  width: 46px;
+  height: 46px;
+  font-size: 1.1rem;
+  opacity: 0.7;
+}
+
+#tc-item.has-item {
+  border-color: #ffd54a;
+  animation: item-glow 0.9s infinite alternate;
+}
+
+@keyframes item-glow {
+  from { box-shadow: 0 0 6px rgba(255, 213, 74, 0.5); }
+  to   { box-shadow: 0 0 18px rgba(255, 213, 74, 1); }
+}
+
+/* ---- スマートフォン向けレイアウト ---- */
+@media (hover: none) and (pointer: coarse) {
+  #touch-controls {
+    display: flex;
+  }
+
+  .controls-help {
+    display: none;
+  }
+
+  /* アイテム表示は🎁ボタンが兼ねる */
+  #hud-item {
+    display: none;
+  }
+
+  .race-container {
+    padding: 8px 0 16px;
+  }
+
+  h1 {
+    font-size: 1.15rem;
+    margin-bottom: 10px;
+  }
+
+  /* 縦横どちらでも操作バーごと画面に収まる大きさに */
+  .game-area,
+  #touch-controls {
+    width: min(720px, 96vw, calc((100vh - 230px) * 5 / 3));
+    width: min(720px, 96vw, calc((100dvh - 230px) * 5 / 3));
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .game-area {
+    margin-top: 0;
+  }
+
+  .back-link {
+    margin-top: 10px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) and (max-width: 420px) {
+  .tc-btn {
+    width: 64px;
+    height: 64px;
+    font-size: 1.4rem;
+  }
+
+  .tc-gas {
+    width: 96px;
+  }
+
+  /* 小さい画面ではパネルをコンパクトに */
+  #panel {
+    gap: 8px;
+    padding: 10px 0;
+  }
+
+  #panel h2 {
+    font-size: 1.05rem;
+  }
+
+  .panel-text {
+    font-size: 0.78rem;
+    padding: 0 10px;
+  }
+
+  .course-btn {
+    padding: 6px 8px;
+    font-size: 0.78rem;
+  }
+
+  #start-btn {
+    padding: 9px 28px;
+    font-size: 1rem;
+  }
+}
+
+/* 横持ち: 見出しを消してゲームを大きく、ボタンは画面下に重ねる */
+@media (hover: none) and (pointer: coarse) and (orientation: landscape) {
+  h1,
+  .race-container .back-link {
+    display: none;
+  }
+
+  /* タイム表示はボタンと重ならないようミニマップの左へ */
+  .hud-right {
+    bottom: auto;
+    top: 10px;
+    right: 116px;
+  }
+
+  .race-container {
+    padding: 6px 0;
+  }
+
+  .game-area {
+    width: min(720px, 96vw, calc((100vh - 24px) * 5 / 3));
+    width: min(720px, 96vw, calc((100dvh - 24px) * 5 / 3));
+  }
+
+  #touch-controls {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 10px;
+    width: auto;
+    margin: 0;
+    padding: 0 14px;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .tc-btn {
+    pointer-events: auto;
+    opacity: 0.85;
+  }
+}
+
+/* 全画面表示（⛶ボタン） */
+.race-container:fullscreen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+  width: 100%;
 }
 
 .controls-help {

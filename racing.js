@@ -652,20 +652,45 @@
 
   function bindTouch(id, flag) {
     const el = document.getElementById(id);
-    const on = (e) => { e.preventDefault(); initAudio(); input[flag] = true; };
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      initAudio();
+      // 指が少しずれても押しっぱなしが切れないようにキャプチャ
+      try { el.setPointerCapture(e.pointerId); } catch (err) { /* 合成イベント等 */ }
+      input[flag] = true;
+    });
     const off = (e) => { e.preventDefault(); input[flag] = false; };
-    el.addEventListener('pointerdown', on);
     el.addEventListener('pointerup', off);
     el.addEventListener('pointercancel', off);
-    el.addEventListener('pointerleave', off);
   }
   bindTouch('tc-left', 'left');
   bindTouch('tc-right', 'right');
   bindTouch('tc-gas', 'up');
-  document.getElementById('tc-item').addEventListener('pointerdown', (e) => {
+
+  const tcItem = document.getElementById('tc-item');
+  tcItem.addEventListener('contextmenu', (e) => e.preventDefault());
+  tcItem.addEventListener('pointerdown', (e) => {
     e.preventDefault();
+    initAudio();
     itemPressed = true;
   });
+
+  // 全画面ボタン（非対応ブラウザでは隠す）
+  const fsBtn = document.getElementById('tc-fs');
+  if (document.documentElement.requestFullscreen) {
+    fsBtn.addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.querySelector('.race-container').requestFullscreen().catch(() => {});
+    });
+  } else {
+    fsBtn.style.display = 'none';
+  }
+
+  // バイブ振動（対応端末のみ）
+  function buzz(pattern) {
+    if (navigator.vibrate) navigator.vibrate(pattern);
+  }
 
   // ===== ゲーム状態 =====
   let karts = [];
@@ -845,6 +870,7 @@
 
   function useItem(k) {
     if (!k.item) return;
+    if (k.isPlayer) buzz(30);
     if (k.item === 'boost') {
       k.boost = 1.6;
       if (k.isPlayer) beep(880, 0.3, 0.12, 'sawtooth');
@@ -887,7 +913,7 @@
           k.item = Math.random() < 0.6 ? 'boost' : 'banana';
           k.aiItemT = 1.5 + Math.random() * 3;
           box.respawn = 4;
-          if (k.isPlayer) beep(660, 0.12, 0.1, 'triangle');
+          if (k.isPlayer) { beep(660, 0.12, 0.1, 'triangle'); buzz(20); }
           break;
         }
       }
@@ -904,7 +930,7 @@
           k.spin = 1;
           k.speed *= 0.25;
           bananas.splice(i, 1);
-          if (k.isPlayer) beep(180, 0.4, 0.15, 'sawtooth');
+          if (k.isPlayer) { beep(180, 0.4, 0.15, 'sawtooth'); buzz([60, 50, 60]); }
           break;
         }
       }
@@ -1200,7 +1226,10 @@
     hudLap.textContent = `LAP ${Math.min(Math.max(player.lap, 1), LAPS)}/${LAPS}`;
     hudTime.textContent = fmtTime(raceTime);
     hudSpeed.textContent = `${Math.max(0, Math.round(player.speed * 0.6))} km/h`;
-    hudItem.textContent = player.item === 'boost' ? '🚀' : player.item === 'banana' ? '🍌' : '';
+    const icon = player.item === 'boost' ? '🚀' : player.item === 'banana' ? '🍌' : '';
+    hudItem.textContent = icon;
+    tcItem.textContent = icon || '🎁';
+    tcItem.classList.toggle('has-item', !!icon);
   }
 
   // ===== 進行管理 =====
@@ -1210,6 +1239,7 @@
     playerFinishTime = raceTime;
     state = 'finished';
     msgEl.textContent = 'FINISH!';
+    buzz(120);
     beep(660, 0.2);
     setTimeout(() => beep(880, 0.4), 200);
     setTimeout(showResults, 1800);
