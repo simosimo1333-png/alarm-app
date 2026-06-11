@@ -2,7 +2,8 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a1a2e" />
   <title>カートレース</title>
   <link rel="stylesheet" href="racing.css" />
 </head>
@@ -35,16 +36,17 @@
         <button id="start-btn">スタート！</button>
         <div id="results" class="hidden"></div>
       </div>
+    </div>
 
-      <div id="touch-controls">
-        <div class="tc-group">
-          <button class="tc-btn" id="tc-left">◀</button>
-          <button class="tc-btn" id="tc-right">▶</button>
-        </div>
-        <div class="tc-group">
-          <button class="tc-btn" id="tc-item">🎁</button>
-          <button class="tc-btn tc-gas" id="tc-gas">GO</button>
-        </div>
+    <div id="touch-controls">
+      <div class="tc-group">
+        <button class="tc-btn" id="tc-left">◀</button>
+        <button class="tc-btn" id="tc-right">▶</button>
+      </div>
+      <button class="tc-btn tc-small" id="tc-fs">⛶</button>
+      <div class="tc-group">
+        <button class="tc-btn" id="tc-item">🎁</button>
+        <button class="tc-btn tc-gas" id="tc-gas">GO</button>
       </div>
     </div>
 
