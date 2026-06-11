@@ -3,15 +3,17 @@
   'use strict';
 
   // ===== 定数 =====
-  const W = 600, H = 360;          // 内部解像度（高精細化）
-  const HORIZON = 138;             // 地平線のy座標
-  const FOCAL = 363;               // 焦点距離（投影スケール）
+  const W = 750, H = 450;          // 内部解像度（高精細化）
+  const HORIZON = 172;             // 地平線のy座標
+  const FOCAL = 454;               // 焦点距離（投影スケール）
   const CAM_H = 34;                // カメラの高さ
   const CAM_BACK = 70;             // 自機の何ユニット後ろから見るか
-  const TEX = 1024;                // コーステクスチャの一辺
-  const N_WP = 400;                // ウェイポイント数
+  const TEX = 1400;                // コーステクスチャの一辺（ワールドの広さ）
+  const MIP = TEX / 2;             // 遠景用の縮小テクスチャの一辺
+  const N_WP = 560;                // ウェイポイント数
+  const MM = 180;                  // ミニマップの一辺
 
-  const MAX_SPEED = 270;           // units/s
+  const MAX_SPEED = 285;           // units/s
   const ACCEL = 200;
   const BRAKE = 420;
   const FRICTION = 110;
@@ -45,9 +47,9 @@
       desc: '飛騨の高原を駆け抜ける、ゆったり基本コース。',
       stars: 1, laps: 3, roadW: 132,
       ctrl: [
-        [512, 130], [780, 170], [880, 360], [820, 560], [890, 780],
-        [680, 910], [460, 850], [300, 920], [140, 770], [190, 540],
-        [120, 330], [310, 180],
+        [700, 130], [1010, 170], [1230, 330], [1280, 620], [1180, 880],
+        [1260, 1130], [1040, 1290], [760, 1230], [520, 1300], [260, 1240],
+        [140, 1010], [210, 770], [120, 520], [230, 290], [460, 160],
       ],
       theme: {
         grassA: '#2e7d32', grassB: '#276b2b',
@@ -66,9 +68,10 @@
       desc: '城下町・高山の古い町並みを夕暮れにめぐる市街地コース。',
       stars: 2, laps: 3, roadW: 120,
       ctrl: [
-        [150, 150], [500, 120], [870, 150], [890, 420], [700, 470],
-        [680, 650], [880, 720], [860, 900], [520, 880], [150, 900],
-        [140, 650], [320, 560], [300, 400], [140, 380],
+        [180, 170], [620, 130], [1090, 160], [1270, 330], [1250, 620],
+        [1060, 720], [1040, 950], [1240, 1060], [1230, 1270], [900, 1290],
+        [560, 1250], [200, 1280], [130, 1040], [330, 930], [310, 700],
+        [140, 600], [150, 360],
       ],
       theme: {
         grassA: '#9c8a72', grassB: '#92805f',
@@ -86,11 +89,12 @@
       name: '白川郷 雪のサーキット',
       desc: '合掌造りの里・白川郷をめぐる雪道コース。ところどころ雪のダートですべる！',
       stars: 2, laps: 3, roadW: 128, turnMul: 0.85,
-      dirt: { sections: 6, len: 9, mul: 0.68 },
+      dirt: { sections: 7, len: 14, mul: 0.68 },
       ctrl: [
-        [220, 150], [560, 110], [860, 200], [900, 450], [780, 650],
-        [820, 870], [560, 920], [300, 840], [330, 680], [450, 540],
-        [330, 400], [140, 360], [130, 200],
+        [300, 180], [700, 120], [1100, 180], [1290, 420], [1230, 690],
+        [1050, 840], [1130, 1090], [950, 1270], [640, 1300], [330, 1230],
+        [150, 1010], [260, 820], [430, 700], [330, 540], [150, 430],
+        [170, 250],
       ],
       theme: {
         grassA: '#f2f6f7', grassB: '#e3ecef',
@@ -109,9 +113,9 @@
       desc: '雲の上を走る天空の山岳道路。ながれるような高速コーナーが続く。',
       stars: 2, laps: 3, roadW: 124,
       ctrl: [
-        [200, 140], [520, 100], [840, 160], [920, 400], [800, 560],
-        [880, 760], [680, 910], [420, 820], [240, 900], [120, 720],
-        [230, 560], [120, 400], [160, 220],
+        [260, 160], [660, 110], [1080, 160], [1290, 380], [1240, 650],
+        [1070, 800], [1220, 1010], [1130, 1250], [800, 1300], [470, 1240],
+        [170, 1280], [120, 1020], [300, 860], [160, 640], [130, 400],
       ],
       theme: {
         grassA: '#6b7d62', grassB: '#5f7057',
@@ -130,11 +134,11 @@
       desc: '紅葉の奥飛騨をのぼる、狭い道とヘアピン連続の難関峠コース。',
       stars: 3, laps: 2, roadW: 106,
       ctrl: [
-        [150, 140], [560, 100], [880, 160],
-        [930, 440], [870, 720], [700, 890],
-        [400, 920], [170, 850],
-        [150, 700], [560, 650], [650, 530],
-        [220, 470], [150, 350], [600, 330],
+        [180, 160], [720, 110], [1180, 170],
+        [1290, 440], [1230, 800], [1280, 1100], [1060, 1280],
+        [620, 1310], [260, 1260],
+        [170, 1060], [760, 1000], [900, 840],
+        [300, 760], [170, 580], [820, 520],
       ],
       theme: {
         grassA: '#4f7a2e', grassB: '#456c28',
@@ -158,12 +162,14 @@
   let ROADW = 80;
   let wps = [];          // {x, y, tx, ty} 接線つきウェイポイント
   let texData32 = null;  // Uint32Array (ABGR)
+  let mip32 = null;      // 遠景用の縮小テクスチャ（チラつき防止）
   let hasDirt = false;   // 雪のダートがあるコースか
   let outA32 = 0, outB32 = 0; // テクスチャ範囲外の市松色
   let decorations = [];  // 沿道の飾り {x, y, type, size}
   let ridges = [];       // 山並み（パララックス）
   let skyGrad = null;
   let fogGrad = null;
+  let hazeGrad = null;
 
   // オフスクリーンキャンバスとマスクは使い回す
   // （コース切替のたびに作り直すとモバイルでメモリを圧迫してクラッシュする）
@@ -171,6 +177,8 @@
   texCanvas.width = texCanvas.height = TEX;
   const helperCanvas = document.createElement('canvas');
   helperCanvas.width = helperCanvas.height = TEX;
+  const mipCanvas = document.createElement('canvas');
+  mipCanvas.width = mipCanvas.height = MIP;
   const roadMask = new Uint8Array(TEX * TEX); // 1=道路
   const dirtMask = new Uint8Array(TEX * TEX); // 1=雪のダート
 
@@ -295,12 +303,18 @@
   function buildTexture() {
     const t = texCanvas.getContext('2d');
 
-    // 地面（市松模様）
+    // 地面（市松模様 + ランダムなまだらで質感を出す）
     for (let y = 0; y < TEX; y += 64) {
       for (let x = 0; x < TEX; x += 64) {
         t.fillStyle = ((x ^ y) & 64) ? theme.grassA : theme.grassB;
         t.fillRect(x, y, 64, 64);
       }
+    }
+    for (let i = 0; i < 2600; i++) {
+      t.fillStyle = (i & 1) ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)';
+      t.beginPath();
+      t.arc(rnd() * TEX, rnd() * TEX, 1 + rnd() * 2.2, 0, Math.PI * 2);
+      t.fill();
     }
 
     t.lineJoin = 'round';
@@ -328,11 +342,19 @@
     t.stroke();
     t.setLineDash([]);
 
-    // 路面
+    // 路面（アスファルトの粒感を散らす）
     tracePath(t);
     t.strokeStyle = theme.road;
     t.lineWidth = ROADW;
     t.stroke();
+    for (let i = 0; i < 2400; i++) {
+      const w = wps[(rnd() * N_WP) | 0];
+      const lat = (rnd() - 0.5) * (ROADW - 14);
+      t.fillStyle = (i & 1) ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.07)';
+      t.beginPath();
+      t.arc(w.x - w.ty * lat, w.y + w.tx * lat, 0.8 + rnd() * 1.6, 0, Math.PI * 2);
+      t.fill();
+    }
 
     // センターライン
     tracePath(t);
@@ -345,13 +367,14 @@
     // 雪のダート区間（センターラインの上、スタートラインの下に描く）
     buildDirt(t);
 
-    // スタートライン（市松）
+    // スタートライン（市松・道幅いっぱい）
     {
       const w0 = wps[0];
       const rx = -w0.ty, ry = w0.tx; // 道の横方向
       const sq = 8;
+      const half = Math.ceil(ROADW / 2 / sq);
       for (let row = 0; row < 2; row++) {
-        for (let k = -5; k < 5; k++) {
+        for (let k = -half; k < half; k++) {
           t.fillStyle = ((k + row) & 1) ? '#111' : '#fff';
           const cx = w0.x + rx * (k * sq + sq / 2) + w0.tx * (row * sq);
           const cy = w0.y + ry * (k * sq + sq / 2) + w0.ty * (row * sq);
@@ -367,6 +390,13 @@
     texData32 = new Uint32Array(t.getImageData(0, 0, TEX, TEX).data.buffer);
     outA32 = abgr(theme.grassA);
     outB32 = abgr(theme.grassB);
+
+    // 遠景用の縮小テクスチャ（ミップマップ）。遠くの路面のチラつきを抑える
+    const mg = mipCanvas.getContext('2d');
+    mg.imageSmoothingEnabled = true;
+    mg.imageSmoothingQuality = 'high';
+    mg.drawImage(texCanvas, 0, 0, MIP, MIP);
+    mip32 = new Uint32Array(mg.getImageData(0, 0, MIP, MIP).data.buffer);
 
     // 走行マスク（縁石まで走行可）
     const m = helperCanvas.getContext('2d');
@@ -681,7 +711,55 @@
 
   const bananaSprite = makeEmojiSprite('🍌');
   const starSprite = makeEmojiSprite('★', '#fff');
-  const cloudSprite = makeEmojiSprite('☁️');
+
+  // ふんわりした雲（絵文字よりやわらかい見た目に）
+  function makeCloudSprite() {
+    const c = document.createElement('canvas');
+    c.width = 120;
+    c.height = 64;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(200,214,228,0.6)';
+    g.beginPath();
+    g.ellipse(60, 50, 40, 9, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.96)';
+    for (const [x, y, r] of [[32, 40, 17], [56, 30, 22], [84, 38, 16], [60, 44, 21]]) {
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+    }
+    return c;
+  }
+  const cloudSprite = makeCloudSprite();
+
+  // 太陽のやわらかい光
+  function makeGlowSprite() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 220;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(110, 110, 6, 110, 110, 108);
+    rg.addColorStop(0, 'rgba(255,250,228,0.95)');
+    rg.addColorStop(0.25, 'rgba(255,244,200,0.5)');
+    rg.addColorStop(1, 'rgba(255,244,200,0)');
+    g.fillStyle = rg;
+    g.fillRect(0, 0, 220, 220);
+    return c;
+  }
+  const glowSprite = makeGlowSprite();
+
+  // 画面端を少し落とすビネット（画の締まりを出す）
+  const vignette = (() => {
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(W / 2, H * 0.46, H * 0.5, W / 2, H * 0.52, H * 1.02);
+    rg.addColorStop(0, 'rgba(0,0,0,0)');
+    rg.addColorStop(1, 'rgba(10,12,30,0.28)');
+    g.fillStyle = rg;
+    g.fillRect(0, 0, W, H);
+    return c;
+  })();
 
   const DECO = {
     tree:     { img: makeTreeSprite('#2e7d32', '#1b5e20', false), w: 46 },
@@ -727,14 +805,26 @@
     skyGrad = ctx.createLinearGradient(0, 0, 0, HORIZON);
     skyGrad.addColorStop(0, theme.skyTop);
     skyGrad.addColorStop(1, theme.skyBot);
-    fogGrad = ctx.createLinearGradient(0, HORIZON, 0, HORIZON + 36);
+    fogGrad = ctx.createLinearGradient(0, HORIZON, 0, HORIZON + 44);
     fogGrad.addColorStop(0, `rgba(${theme.fog},0.9)`);
     fogGrad.addColorStop(1, `rgba(${theme.fog},0)`);
-    // 山並み（飛騨山脈っぽいシルエットを2層）
+    hazeGrad = ctx.createLinearGradient(0, HORIZON - 52, 0, HORIZON);
+    hazeGrad.addColorStop(0, `rgba(${theme.fog},0)`);
+    hazeGrad.addColorStop(1, `rgba(${theme.fog},0.55)`);
+    // 山並み（飛騨山脈っぽいシルエット）
     ridges = theme.ridges.map((r) => ({
       ...r,
       peaks: Array.from({ length: 24 }, () => 0.35 + rnd() * 0.65),
     }));
+    // いちばん遠い山脈を1枚自動で足して奥行きを出す
+    const far = theme.ridges[0];
+    ridges.unshift({
+      color: shade(far.color, 26),
+      amp: far.amp * 1.4,
+      speed: 34,
+      snow: far.snow,
+      peaks: Array.from({ length: 24 }, () => 0.35 + rnd() * 0.65),
+    });
   }
 
   function buildCourse(idx, seed) {
@@ -1065,7 +1155,7 @@
   }
 
   function steerForCpu(k) {
-    const target = wps[(k.wp + 7) % N_WP];
+    const target = wps[(k.wp + 9) % N_WP];
     const want = Math.atan2(target.y - k.y, target.x - k.x);
     let diff = want - k.a;
     while (diff > Math.PI) diff -= Math.PI * 2;
@@ -1284,6 +1374,7 @@
 
   function renderGround(camX, camY, dirX, dirY) {
     const rxv = -dirY, ryv = dirX; // カメラの右方向
+    const mipD = FOCAL * 1.2;      // これより遠い行は縮小テクスチャから読む
     let p = 0;
     for (let y = HORIZON; y < H; y++) {
       const rowD = (CAM_H * FOCAL) / (y - HORIZON + 1);
@@ -1294,15 +1385,29 @@
       let wy = cy - ryv * halfw;
       const sx = (rxv * 2 * halfw) / W;
       const sy = (ryv * 2 * halfw) / W;
-      for (let x = 0; x < W; x++) {
-        const txi = wx | 0, tyi = wy | 0;
-        if (txi >= 0 && tyi >= 0 && txi < TEX && tyi < TEX) {
-          ground32[p++] = texData32[tyi * TEX + txi];
-        } else {
-          ground32[p++] = (((txi >> 6) ^ (tyi >> 6)) & 1) ? outA32 : outB32;
+      if (rowD > mipD) {
+        // 遠景: ミップマップでチラつきを抑える
+        for (let x = 0; x < W; x++) {
+          const txi = wx | 0, tyi = wy | 0;
+          if (txi >= 0 && tyi >= 0 && txi < TEX && tyi < TEX) {
+            ground32[p++] = mip32[(tyi >> 1) * MIP + (txi >> 1)];
+          } else {
+            ground32[p++] = (((txi >> 6) ^ (tyi >> 6)) & 1) ? outA32 : outB32;
+          }
+          wx += sx;
+          wy += sy;
         }
-        wx += sx;
-        wy += sy;
+      } else {
+        for (let x = 0; x < W; x++) {
+          const txi = wx | 0, tyi = wy | 0;
+          if (txi >= 0 && tyi >= 0 && txi < TEX && tyi < TEX) {
+            ground32[p++] = texData32[tyi * TEX + txi];
+          } else {
+            ground32[p++] = (((txi >> 6) ^ (tyi >> 6)) & 1) ? outA32 : outB32;
+          }
+          wx += sx;
+          wy += sy;
+        }
       }
     }
     ctx.putImageData(groundImg, 0, HORIZON);
@@ -1311,6 +1416,14 @@
   function renderSky(heading) {
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, W, HORIZON);
+
+    // 太陽の光（山の向こうに見える）
+    {
+      const sunSpan = W * 4;
+      let sx = (W * 2.7 - (heading / (Math.PI * 2)) * sunSpan) % sunSpan;
+      if (sx < 0) sx += sunSpan;
+      ctx.drawImage(glowSprite, sx - 110, HORIZON - 190, 220, 220);
+    }
 
     // 山並み（パララックスつき）
     const ak = HORIZON / 110; // 解像度スケールに山の高さを合わせる
@@ -1352,13 +1465,18 @@
       }
     }
 
-    // 視点に合わせて流れる雲
+    // 地平線の霞（山すそをやわらかく）
+    ctx.fillStyle = hazeGrad;
+    ctx.fillRect(0, HORIZON - 52, W, 52);
+
+    // 視点に合わせて流れる雲（大きさに変化をつける）
     const cspan = W * 4;
-    for (let i = 0; i < 6; i++) {
-      const base = i * cspan / 6;
+    for (let i = 0; i < 7; i++) {
+      const base = i * cspan / 7;
       let x = (base - heading / (Math.PI * 2) * cspan) % cspan;
       if (x < 0) x += cspan;
-      ctx.drawImage(cloudSprite, x - 52, ((i * 37) % 44) + 6, 34, 34);
+      const cw = 52 + (i % 3) * 26;
+      ctx.drawImage(cloudSprite, x - cw, ((i * 41) % 64) + 8, cw, cw * 0.53);
     }
   }
 
@@ -1381,7 +1499,7 @@
     for (const d of decorations) {
       const pr = project(camX, camY, dirX, dirY, d.x, d.y);
       // 至近距離は巨大描画になるだけなのでスキップ
-      if (pr && pr.fz < 1100 && pr.fz > 22) items.push({ ...pr, type: 'deco', deco: d });
+      if (pr && pr.fz < 1500 && pr.fz > 22) items.push({ ...pr, type: 'deco', deco: d });
     }
     for (const box of itemBoxes) {
       if (box.respawn > 0) continue;
@@ -1476,42 +1594,70 @@
       for (let i = 0; i < 6; i++) {
         ctx.beginPath();
         ctx.arc(
-          pr.x + (Math.random() - 0.5) * 130,
-          pr.y + 2 + Math.random() * 14,
-          1.5 + Math.random() * 3, 0, Math.PI * 2
+          pr.x + (Math.random() - 0.5) * 160,
+          pr.y + 2 + Math.random() * 16,
+          2 + Math.random() * 3.5, 0, Math.PI * 2
         );
         ctx.fill();
+      }
+    }
+    // ブースト中の火花
+    if (player.boost > 0) {
+      for (let i = 0; i < 7; i++) {
+        ctx.fillStyle = (i & 1) ? 'rgba(255,170,40,0.9)' : 'rgba(255,230,120,0.9)';
+        ctx.beginPath();
+        ctx.arc(
+          pr.x + (Math.random() - 0.5) * 90,
+          pr.y + 6 + Math.random() * 30,
+          2 + Math.random() * 4, 0, Math.PI * 2
+        );
+        ctx.fill();
+      }
+    }
+    // 最高速付近のスピード線
+    if (Math.abs(player.speed) > MAX_SPEED * 0.9) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 8; i++) {
+        const sy = HORIZON + Math.random() * (H - HORIZON);
+        const left = Math.random() < 0.5;
+        const x0 = left ? Math.random() * W * 0.15 : W - Math.random() * W * 0.15;
+        const len = (30 + Math.random() * 70) * (left ? 1 : -1);
+        ctx.beginPath();
+        ctx.moveTo(x0, sy);
+        ctx.lineTo(x0 + len, sy);
+        ctx.stroke();
       }
     }
   }
 
   function renderFog() {
     ctx.fillStyle = fogGrad;
-    ctx.fillRect(0, HORIZON, W, 36);
+    ctx.fillRect(0, HORIZON, W, 44);
   }
 
   function renderMinimap() {
-    const S = 120 / TEX;
-    mmCtx.clearRect(0, 0, 120, 120);
+    const S = MM / TEX;
+    mmCtx.clearRect(0, 0, MM, MM);
     mmCtx.fillStyle = 'rgba(0,0,0,0.35)';
     mmCtx.beginPath();
-    mmCtx.roundRect(0, 0, 120, 120, 14);
+    mmCtx.roundRect(0, 0, MM, MM, 22);
     mmCtx.fill();
     mmCtx.beginPath();
     mmCtx.moveTo(wps[0].x * S, wps[0].y * S);
     for (let i = 1; i < N_WP; i++) mmCtx.lineTo(wps[i].x * S, wps[i].y * S);
     mmCtx.closePath();
     mmCtx.strokeStyle = 'rgba(255,255,255,0.75)';
-    mmCtx.lineWidth = 4;
+    mmCtx.lineWidth = 6;
     mmCtx.stroke();
     for (const k of karts) {
       mmCtx.fillStyle = k.color;
       mmCtx.beginPath();
-      mmCtx.arc(k.x * S, k.y * S, k.isPlayer ? 4 : 3, 0, Math.PI * 2);
+      mmCtx.arc(k.x * S, k.y * S, k.isPlayer ? 6 : 4.5, 0, Math.PI * 2);
       mmCtx.fill();
       if (k.isPlayer) {
         mmCtx.strokeStyle = '#fff';
-        mmCtx.lineWidth = 1.5;
+        mmCtx.lineWidth = 2;
         mmCtx.stroke();
       }
     }
@@ -1527,6 +1673,7 @@
     renderFog();
     renderSprites(camX, camY, dirX, dirY);
     renderPlayer();
+    ctx.drawImage(vignette, 0, 0);
     renderMinimap();
   }
 
