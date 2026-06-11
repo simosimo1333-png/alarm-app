@@ -686,9 +686,54 @@
     el.addEventListener('pointerup', off);
     el.addEventListener('pointercancel', off);
   }
-  bindTouch('tc-left', 'left');
-  bindTouch('tc-right', 'right');
   bindTouch('tc-gas', 'up');
+
+  // ドラッグ式のアナログステアバー
+  const steerBar = document.getElementById('steer-bar');
+  const steerKnob = document.getElementById('steer-knob');
+  let touchSteer = 0;       // -1〜1
+  let steerPointer = null;  // 操作中のポインタID
+  function setKnob(v) {
+    steerKnob.style.left = `${50 + v * 32}%`;
+  }
+  function steerFromEvent(e) {
+    const r = steerBar.getBoundingClientRect();
+    const half = Math.max(1, r.width / 2 - 30);
+    touchSteer = Math.max(-1, Math.min(1, (e.clientX - (r.left + r.width / 2)) / half));
+    setKnob(touchSteer);
+  }
+  steerBar.addEventListener('contextmenu', (e) => e.preventDefault());
+  steerBar.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    initAudio();
+    try { steerBar.setPointerCapture(e.pointerId); } catch (err) { /* 合成イベント等 */ }
+    steerPointer = e.pointerId;
+    steerFromEvent(e);
+  });
+  steerBar.addEventListener('pointermove', (e) => {
+    if (e.pointerId === steerPointer) steerFromEvent(e);
+  });
+  const steerOff = (e) => {
+    if (e.pointerId !== steerPointer) return;
+    steerPointer = null;
+    touchSteer = 0;
+    setKnob(0);
+  };
+  steerBar.addEventListener('pointerup', steerOff);
+  steerBar.addEventListener('pointercancel', steerOff);
+
+  // ピンチ / ダブルタップによる画面ズームを抑止
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  document.addEventListener('gesturechange', (e) => e.preventDefault());
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1 && e.cancelable) e.preventDefault();
+  }, { passive: false });
+  let lastTouchEnd = 0;
+  document.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    if (now - lastTouchEnd <= 300 && e.cancelable) e.preventDefault();
+    lastTouchEnd = now;
+  }, { passive: false });
 
   const tcItem = document.getElementById('tc-item');
   tcItem.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -758,6 +803,7 @@
     bananas = [];
     finishOrder = [];
     raceTime = 0;
+    steerSmooth = 0;
 
     const grid = N_WP - 8;
     karts.push(spawnKart(CPU_DEFS[0], grid + 4, -22, false));
@@ -787,6 +833,22 @@
   }
 
   // ===== 物理・進行 =====
+  // キー操作は瞬時に±1にせず補間してマイルドに。スライダーはアナログ値をそのまま使う
+  let steerSmooth = 0;
+  function updatePlayerSteer(dt) {
+    if (steerPointer !== null) {
+      steerSmooth = touchSteer;
+      return steerSmooth;
+    }
+    const target = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    const rate = target === 0 ? 10 : 6; // 戻りは速め、切り込みは緩やかに
+    const step = rate * dt;
+    const d = target - steerSmooth;
+    steerSmooth += Math.max(-step, Math.min(step, d));
+    if (target === 0 && Math.abs(steerSmooth) < 0.03) steerSmooth = 0;
+    return steerSmooth;
+  }
+
   function progressOf(k) {
     return k.lap * N_WP + k.wp;
   }
@@ -831,7 +893,7 @@
 
     let steer = 0, gas = false, brake = false;
     if (k.isPlayer && !DEMO && state === 'race' && !k.finished) {
-      steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+      steer = updatePlayerSteer(dt);
       gas = input.up;
       brake = input.down;
       if (itemPressed) { useItem(k); }
@@ -1140,7 +1202,7 @@
     const pr = { x: W / 2, y: HORIZON + (CAM_H / CAM_BACK) * FOCAL, scale: FOCAL / CAM_BACK };
     ctx.save();
     // ハンドル操作で軽く傾ける
-    const lean = ((input.right ? 1 : 0) - (input.left ? 1 : 0)) * 0.08;
+    const lean = steerSmooth * 0.1;
     ctx.translate(pr.x, pr.y);
     ctx.rotate(lean);
     ctx.translate(-pr.x, -pr.y);
@@ -1335,11 +1397,9 @@
   selectCourse(0);
   requestAnimationFrame(loop);
 
-  // 観戦モードでは検証用に最低限の状態を公開
-  if (DEMO) {
-    window.__kart = {
-      get player() { return player; },
-      isDirt, isRoad,
-    };
-  }
+  // 検証用に最低限の状態を公開
+  window.__kart = {
+    get player() { return player; },
+    isDirt, isRoad,
+  };
 })();
