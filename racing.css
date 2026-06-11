@@ -4,6 +4,12 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  /* ダブルタップズームを無効化（ゲーム中の誤ズーム防止） */
+  touch-action: manipulation;
+}
+
 body {
   font-family: 'Segoe UI', sans-serif;
   background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
@@ -243,6 +249,39 @@ h1 {
   gap: 12px;
 }
 
+/* ドラッグ式のステアバー */
+#steer-bar {
+  position: relative;
+  width: 220px;
+  height: 68px;
+  border-radius: 34px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 1.1rem;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#steer-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+
 .tc-btn {
   width: 74px;
   height: 74px;
@@ -328,10 +367,6 @@ h1 {
   .game-area {
     margin-top: 0;
   }
-
-  .back-link {
-    margin-top: 10px;
-  }
 }
 
 @media (hover: none) and (pointer: coarse) and (max-width: 420px) {
@@ -343,6 +378,16 @@ h1 {
 
   .tc-gas {
     width: 96px;
+  }
+
+  #steer-bar {
+    width: 170px;
+    height: 60px;
+  }
+
+  #steer-knob {
+    width: 48px;
+    height: 48px;
   }
 
   /* 小さい画面ではパネルをコンパクトに */
@@ -373,8 +418,7 @@ h1 {
 
 /* 横持ち: 見出しを消してゲームを大きく、ボタンは画面下に重ねる */
 @media (hover: none) and (pointer: coarse) and (orientation: landscape) {
-  h1,
-  .race-container .back-link {
+  h1 {
     display: none;
   }
 
@@ -406,7 +450,8 @@ h1 {
     z-index: 10;
   }
 
-  .tc-btn {
+  .tc-btn,
+  #steer-bar {
     pointer-events: auto;
     opacity: 0.85;
   }
@@ -425,14 +470,6 @@ h1 {
   margin-top: 12px;
   font-size: 0.8rem;
   color: #aaa;
-}
-
-.back-link {
-  display: inline-block;
-  margin-top: 14px;
-  color: #e94560;
-  font-size: 0.9rem;
-  text-decoration: none;
 }
 
 .hidden {
