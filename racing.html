@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>カートレース</title>
+  <link rel="stylesheet" href="racing.css" />
+</head>
+<body>
+  <div class="race-container">
+    <h1>🏁 カートレース</h1>
+
+    <div class="game-area" id="game-area">
+      <canvas id="game" width="480" height="288"></canvas>
+      <canvas id="minimap" width="120" height="120"></canvas>
+
+      <div id="hud" class="hidden">
+        <div class="hud-left">
+          <div id="hud-pos">4位</div>
+          <div id="hud-lap">LAP 1/3</div>
+        </div>
+        <div class="hud-right">
+          <div id="hud-time">0'00"00</div>
+          <div id="hud-speed">0 km/h</div>
+        </div>
+        <div id="hud-item" title="アイテム"></div>
+      </div>
+
+      <div id="message"></div>
+
+      <div id="panel">
+        <h2>🏎️ カートレース</h2>
+        <p class="panel-text">
+          3周のレースでライバル3台に勝とう！<br />
+          コース上の <span class="q">?</span> ボックスでアイテムをゲット！
+        </p>
+        <button id="start-btn">スタート！</button>
+        <div id="results" class="hidden"></div>
+      </div>
+
+      <div id="touch-controls">
+        <div class="tc-group">
+          <button class="tc-btn" id="tc-left">◀</button>
+          <button class="tc-btn" id="tc-right">▶</button>
+        </div>
+        <div class="tc-group">
+          <button class="tc-btn" id="tc-item">🎁</button>
+          <button class="tc-btn tc-gas" id="tc-gas">GO</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="controls-help">
+      操作: ↑/W = アクセル ・ ↓/S = ブレーキ ・ ←→/A D = ハンドル ・ スペース = アイテム使用
+    </p>
+
+    <a class="back-link" href="index.html">← アラームに戻る</a>
+  </div>
+
+  <script src="racing.js"></script>
+</body>
+</html>
