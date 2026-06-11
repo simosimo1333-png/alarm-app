@@ -3,9 +3,9 @@
   'use strict';
 
   // ===== 定数 =====
-  const W = 480, H = 288;          // 内部解像度
-  const HORIZON = 110;             // 地平線のy座標
-  const FOCAL = 290;               // 焦点距離（投影スケール）
+  const W = 600, H = 360;          // 内部解像度（高精細化）
+  const HORIZON = 138;             // 地平線のy座標
+  const FOCAL = 363;               // 焦点距離（投影スケール）
   const CAM_H = 34;                // カメラの高さ
   const CAM_BACK = 70;             // 自機の何ユニット後ろから見るか
   const TEX = 1024;                // コーステクスチャの一辺
@@ -43,7 +43,7 @@
     {
       name: '飛騨高原サーキット',
       desc: '飛騨の高原を駆け抜ける、ゆったり基本コース。',
-      stars: 1, laps: 3, roadW: 104,
+      stars: 1, laps: 3, roadW: 132,
       ctrl: [
         [512, 130], [780, 170], [880, 360], [820, 560], [890, 780],
         [680, 910], [460, 850], [300, 920], [140, 770], [190, 540],
@@ -64,7 +64,7 @@
     {
       name: '高山 古い町並みGP',
       desc: '城下町・高山の古い町並みを夕暮れにめぐる市街地コース。',
-      stars: 2, laps: 3, roadW: 92,
+      stars: 2, laps: 3, roadW: 120,
       ctrl: [
         [150, 150], [500, 120], [870, 150], [890, 420], [700, 470],
         [680, 650], [880, 720], [860, 900], [520, 880], [150, 900],
@@ -79,13 +79,13 @@
           { color: '#9b8aa8', amp: 26, speed: 60 },
           { color: '#7c6b91', amp: 18, speed: 110 },
         ],
-        deco: [['machiya', 4], ['lantern', 2]],
+        deco: [['machiya', 4], ['sakagura', 2], ['yatai', 1], ['lantern', 2], ['nakabashi', 1]],
       },
     },
     {
       name: '白川郷 雪のサーキット',
       desc: '合掌造りの里・白川郷をめぐる雪道コース。ところどころ雪のダートですべる！',
-      stars: 2, laps: 3, roadW: 100, turnMul: 0.85,
+      stars: 2, laps: 3, roadW: 128, turnMul: 0.85,
       dirt: { sections: 6, len: 9, mul: 0.68 },
       ctrl: [
         [220, 150], [560, 110], [860, 200], [900, 450], [780, 650],
@@ -107,7 +107,7 @@
     {
       name: '乗鞍スカイライン',
       desc: '雲の上を走る天空の山岳道路。ながれるような高速コーナーが続く。',
-      stars: 2, laps: 3, roadW: 96,
+      stars: 2, laps: 3, roadW: 124,
       ctrl: [
         [200, 140], [520, 100], [840, 160], [920, 400], [800, 560],
         [880, 760], [680, 910], [420, 820], [240, 900], [120, 720],
@@ -128,7 +128,7 @@
     {
       name: '奥飛騨 つづら折り峠',
       desc: '紅葉の奥飛騨をのぼる、狭い道とヘアピン連続の難関峠コース。',
-      stars: 3, laps: 2, roadW: 80,
+      stars: 3, laps: 2, roadW: 106,
       ctrl: [
         [150, 140], [560, 100], [880, 160],
         [930, 440], [870, 720], [700, 890],
@@ -179,6 +179,14 @@
     const g = parseInt(hex.slice(3, 5), 16);
     const b = parseInt(hex.slice(5, 7), 16);
     return (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
+  }
+
+  // 色を明るく/暗く（スプライトの陰影づけ用）
+  function shade(hex, amt) {
+    const r = Math.max(0, Math.min(255, parseInt(hex.slice(1, 3), 16) + amt));
+    const g = Math.max(0, Math.min(255, parseInt(hex.slice(3, 5), 16) + amt));
+    const b = Math.max(0, Math.min(255, parseInt(hex.slice(5, 7), 16) + amt));
+    return `rgb(${r | 0},${g | 0},${b | 0})`;
   }
 
   // シード付き乱数（対戦時に両者のダート・飾り配置を一致させるため）
@@ -457,35 +465,50 @@
   }
 
   function makeMachiyaSprite() {
-    // 高山の町家（格子と暖簾のある木造家屋）
+    // 高山「さんまち」の町家（出格子の二階家・深い軒）
     const c = document.createElement('canvas');
-    c.width = 100;
-    c.height = 80;
+    c.width = 120;
+    c.height = 96;
     const g = c.getContext('2d');
-    // 屋根
-    g.fillStyle = '#37474f';
+    // 深い軒の瓦屋根
+    g.fillStyle = '#2f3a40';
     g.beginPath();
-    g.moveTo(0, 30); g.lineTo(50, 12); g.lineTo(100, 30);
-    g.lineTo(92, 38); g.lineTo(8, 38);
-    g.closePath(); g.fill();
-    // 壁（黒っぽい木造）
-    g.fillStyle = '#4e342e';
-    g.fillRect(8, 38, 84, 40);
-    // 格子窓（灯りがともる）
-    g.fillStyle = '#ffecb3';
-    g.fillRect(16, 48, 30, 22);
-    g.strokeStyle = '#3e2723';
-    g.lineWidth = 2;
-    for (let x = 20; x < 46; x += 6) {
-      g.beginPath(); g.moveTo(x, 48); g.lineTo(x, 70); g.stroke();
+    g.moveTo(2, 30); g.lineTo(60, 11); g.lineTo(118, 30);
+    g.lineTo(112, 39); g.lineTo(8, 39); g.closePath(); g.fill();
+    g.fillStyle = '#48565e';
+    g.fillRect(8, 34, 104, 5);   // 瓦の段
+    g.fillStyle = '#6b4f3a';
+    g.fillRect(10, 39, 100, 4);  // 軒裏
+    // 二階の出格子（弁柄色の壁＋明るい格子）
+    g.fillStyle = '#5b3a2e';
+    g.fillRect(10, 43, 100, 22);
+    g.fillStyle = '#caa15f';
+    g.fillRect(15, 46, 90, 16);
+    g.strokeStyle = '#3a2418';
+    g.lineWidth = 1.3;
+    for (let x = 18; x < 105; x += 5) {
+      g.beginPath(); g.moveTo(x, 46); g.lineTo(x, 62); g.stroke();
     }
-    // 入口と暖簾
-    g.fillStyle = '#3e2723';
-    g.fillRect(58, 46, 26, 32);
-    g.fillStyle = '#1a237e';
-    g.fillRect(58, 46, 26, 12);
-    g.fillStyle = '#fff';
-    g.fillRect(70, 48, 2, 8);
+    // 一階の壁
+    g.fillStyle = '#4e342e';
+    g.fillRect(10, 65, 100, 30);
+    // 格子窓（灯りがともる）
+    g.fillStyle = '#ffd38a';
+    g.fillRect(15, 71, 42, 20);
+    g.strokeStyle = '#2e1d12';
+    for (let x = 19; x < 57; x += 5) {
+      g.beginPath(); g.moveTo(x, 71); g.lineTo(x, 91); g.stroke();
+    }
+    // 入口＋藍の暖簾
+    g.fillStyle = '#241712';
+    g.fillRect(66, 67, 40, 28);
+    g.fillStyle = '#28406b';
+    g.fillRect(66, 67, 40, 12);
+    g.fillStyle = 'rgba(255,255,255,0.8)';
+    g.fillRect(84, 69, 3, 9);
+    // 軒下の赤提灯
+    g.fillStyle = '#c62828';
+    g.beginPath(); g.ellipse(60, 47, 4, 6, 0, 0, Math.PI * 2); g.fill();
     return c;
   }
 
@@ -533,6 +556,115 @@
     return c;
   }
 
+  function makeYataiSprite() {
+    // 高山祭の屋台（金の唐破風屋根・黒漆の山車）
+    const c = document.createElement('canvas');
+    c.width = 80;
+    c.height = 112;
+    const g = c.getContext('2d');
+    // 御所車（車輪）
+    g.fillStyle = '#3a2a18';
+    g.beginPath(); g.arc(26, 102, 9, 0, Math.PI * 2); g.arc(54, 102, 9, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#1c140c';
+    g.beginPath(); g.arc(26, 102, 3, 0, Math.PI * 2); g.arc(54, 102, 3, 0, Math.PI * 2); g.fill();
+    // 黒漆の本体（下段）
+    g.fillStyle = '#15110d';
+    g.fillRect(18, 64, 44, 36);
+    g.fillStyle = '#c9a227';   // 金の装飾帯
+    g.fillRect(18, 64, 44, 5);
+    g.fillRect(18, 92, 44, 5);
+    g.fillStyle = '#8b1d1d';   // 朱の柱
+    g.fillRect(20, 69, 5, 23); g.fillRect(55, 69, 5, 23);
+    // 中段（白い幕）
+    g.fillStyle = '#efe6d0';
+    g.fillRect(22, 52, 36, 14);
+    g.fillStyle = '#b8860b';
+    g.fillRect(22, 52, 36, 3);
+    // 唐破風の屋根（金のグラデ）
+    const rg = g.createLinearGradient(0, 30, 0, 54);
+    rg.addColorStop(0, '#f4d774'); rg.addColorStop(1, '#b8860b');
+    g.fillStyle = rg;
+    g.beginPath();
+    g.moveTo(8, 54);
+    g.quadraticCurveTo(40, 28, 72, 54);
+    g.quadraticCurveTo(40, 44, 8, 54);
+    g.closePath(); g.fill();
+    g.fillStyle = '#7a5a12';    // 棟
+    g.fillRect(38, 30, 4, 16);
+    g.fillStyle = '#e8c84a';    // てっぺんの飾り
+    g.beginPath(); g.arc(40, 28, 4, 0, Math.PI * 2); g.fill();
+    // 赤提灯
+    g.fillStyle = '#d32f2f';
+    g.beginPath();
+    g.ellipse(14, 62, 4, 6, 0, 0, Math.PI * 2);
+    g.ellipse(66, 62, 4, 6, 0, 0, Math.PI * 2);
+    g.fill();
+    return c;
+  }
+
+  function makeSakaguraSprite() {
+    // 造り酒屋（白漆喰・なまこ壁・軒先の杉玉）
+    const c = document.createElement('canvas');
+    c.width = 112;
+    c.height = 88;
+    const g = c.getContext('2d');
+    // 瓦屋根
+    g.fillStyle = '#37434a';
+    g.beginPath();
+    g.moveTo(2, 26); g.lineTo(56, 8); g.lineTo(110, 26);
+    g.lineTo(102, 34); g.lineTo(10, 34); g.closePath(); g.fill();
+    g.fillStyle = '#48565e';
+    g.fillRect(10, 30, 92, 4);
+    // 白漆喰の壁
+    g.fillStyle = '#efeae0';
+    g.fillRect(12, 34, 88, 52);
+    // なまこ壁（腰の格子模様）
+    g.fillStyle = '#cfd6db';
+    g.fillRect(12, 66, 88, 20);
+    g.strokeStyle = '#9aa6ad';
+    g.lineWidth = 1.3;
+    for (let x = 16; x < 100; x += 8) {
+      g.beginPath(); g.moveTo(x, 66); g.lineTo(x + 6, 86); g.stroke();
+      g.beginPath(); g.moveTo(x + 6, 66); g.lineTo(x, 86); g.stroke();
+    }
+    // 扉
+    g.fillStyle = '#3a2a1c';
+    g.fillRect(46, 56, 22, 30);
+    // 杉玉（軒先の緑の玉＝新酒の合図）
+    g.fillStyle = '#6e8b3d';
+    g.beginPath(); g.arc(30, 42, 9, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    g.beginPath(); g.arc(32, 44, 9, 0.1, Math.PI - 0.3); g.fill();
+    // 酒の看板
+    g.fillStyle = '#5d4037';
+    g.fillRect(66, 38, 22, 13);
+    g.fillStyle = '#f5deb3';
+    g.font = 'bold 10px serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('酒', 77, 45);
+    return c;
+  }
+
+  function makeNakabashiSprite() {
+    // 中橋（宮川にかかる朱塗りの欄干）
+    const c = document.createElement('canvas');
+    c.width = 124;
+    c.height = 56;
+    const g = c.getContext('2d');
+    g.fillStyle = '#9c3a2a';     // 橋桁
+    g.fillRect(4, 36, 116, 8);
+    g.fillStyle = '#c0392b';     // 欄干の横木
+    g.fillRect(4, 16, 116, 6);
+    g.fillRect(4, 27, 116, 4);
+    for (const x of [8, 42, 76, 110]) {
+      g.fillStyle = '#a93226';   // 親柱
+      g.fillRect(x, 14, 6, 26);
+      g.fillStyle = '#d4a017';   // 擬宝珠（金）
+      g.beginPath(); g.arc(x + 3, 12, 4, 0, Math.PI * 2); g.fill();
+    }
+    return c;
+  }
+
   // 絵文字は毎フレームfillTextすると巨大なフォントグリフが
   // 大量生成されてモバイルでクラッシュするため、起動時に一度だけ描画しておく
   function makeEmojiSprite(char, color) {
@@ -556,7 +688,10 @@
     autumn:   { img: makeTreeSprite('#ef6c00', '#bf360c', false), w: 46 },
     snowtree: { img: makeTreeSprite('#2e7d32', '#1b5e20', true), w: 46 },
     gassho:   { img: makeGasshoSprite(), w: 120 },
-    machiya:  { img: makeMachiyaSprite(), w: 100 },
+    machiya:  { img: makeMachiyaSprite(), w: 108 },
+    sakagura: { img: makeSakaguraSprite(), w: 98 },
+    yatai:    { img: makeYataiSprite(), w: 60 },
+    nakabashi:{ img: makeNakabashiSprite(), w: 106 },
     onsen:    { img: makeOnsenSprite(), w: 36 },
     rock:     { img: makeRockSprite(), w: 50 },
     cow:      { img: makeEmojiSprite('🐄'), w: 26 },
@@ -598,7 +733,7 @@
     // 山並み（飛騨山脈っぽいシルエットを2層）
     ridges = theme.ridges.map((r) => ({
       ...r,
-      peaks: Array.from({ length: 24 }, () => 0.35 + Math.random() * 0.65),
+      peaks: Array.from({ length: 24 }, () => 0.35 + rnd() * 0.65),
     }));
   }
 
@@ -616,37 +751,64 @@
     buildSky();
   }
 
-  // ===== カートスプライト（後ろ姿） =====
+  // ===== カートスプライト（後ろ姿・高精細） =====
   function makeKartSprite(body, helmet) {
     const c = document.createElement('canvas');
-    c.width = 48;
-    c.height = 40;
+    c.width = 96;
+    c.height = 80;
     const g = c.getContext('2d');
     // タイヤ
-    g.fillStyle = '#1b1b1b';
+    g.fillStyle = '#15151a';
     g.beginPath();
-    g.roundRect(2, 22, 11, 16, 4);
-    g.roundRect(35, 22, 11, 16, 4);
+    g.roundRect(4, 44, 22, 32, 7);
+    g.roundRect(70, 44, 22, 32, 7);
     g.fill();
-    // 車体
-    g.fillStyle = body;
+    g.fillStyle = 'rgba(255,255,255,0.18)';
     g.beginPath();
-    g.roundRect(9, 18, 30, 16, 5);
+    g.roundRect(8, 48, 14, 6, 3);
+    g.roundRect(74, 48, 14, 6, 3);
     g.fill();
     // リアウィング
-    g.fillStyle = body;
-    g.fillRect(12, 12, 24, 4);
-    g.fillRect(22, 14, 4, 6);
-    // ドライバー（ヘルメット）
-    g.fillStyle = helmet;
+    g.fillStyle = shade(body, -52);
+    g.fillRect(18, 20, 60, 8);
+    g.fillRect(30, 26, 6, 12);
+    g.fillRect(60, 26, 6, 12);
+    g.fillStyle = shade(body, 16);
+    g.fillRect(18, 20, 60, 3);
+    // 車体（縦グラデで立体感）
+    const bg = g.createLinearGradient(0, 32, 0, 72);
+    bg.addColorStop(0, shade(body, 36));
+    bg.addColorStop(0.45, body);
+    bg.addColorStop(1, shade(body, -40));
+    g.fillStyle = bg;
     g.beginPath();
-    g.arc(24, 12, 7, 0, Math.PI * 2);
+    g.roundRect(16, 32, 64, 38, 13);
     g.fill();
-    g.fillStyle = 'rgba(255,255,255,0.85)';
-    g.fillRect(19, 10, 10, 3);
+    // サイドのハイライト
+    g.fillStyle = 'rgba(255,255,255,0.22)';
+    g.beginPath();
+    g.roundRect(22, 36, 52, 6, 3);
+    g.fill();
+    // ドライバー（ヘルメット球体）
+    const hg = g.createRadialGradient(43, 14, 2, 48, 20, 17);
+    hg.addColorStop(0, shade(helmet, 45));
+    hg.addColorStop(1, shade(helmet, -22));
+    g.fillStyle = hg;
+    g.beginPath();
+    g.arc(48, 20, 15, 0, Math.PI * 2);
+    g.fill();
+    // バイザー
+    g.fillStyle = 'rgba(18,28,38,0.85)';
+    g.beginPath();
+    g.arc(48, 22, 15, Math.PI * 0.12, Math.PI * 0.88);
+    g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.5)';
+    g.fillRect(39, 15, 9, 3);
     // バンパー
-    g.fillStyle = 'rgba(0,0,0,0.3)';
-    g.fillRect(11, 30, 26, 4);
+    g.fillStyle = 'rgba(0,0,0,0.28)';
+    g.beginPath();
+    g.roundRect(20, 60, 56, 9, 4);
+    g.fill();
     return c;
   }
 
@@ -708,6 +870,7 @@
     el.addEventListener('pointercancel', off);
   }
   bindTouch('tc-gas', 'up');
+  bindTouch('tc-back', 'down');
 
   // ドラッグ式のアナログステアバー
   const steerBar = document.getElementById('steer-bar');
@@ -993,7 +1156,7 @@
     else k.speed -= Math.sign(k.speed) * FRICTION * dt;
 
     if (k.speed > limit) k.speed = Math.max(limit, k.speed - BRAKE * 1.5 * dt);
-    if (k.speed < -70) k.speed = -70;
+    if (k.speed < -120) k.speed = -120;
     if (!gas && !brake && Math.abs(k.speed) < 4) k.speed = 0;
 
     const speedFactor = Math.min(1, Math.abs(k.speed) / (MAX_SPEED * 0.45));
@@ -1150,6 +1313,7 @@
     ctx.fillRect(0, 0, W, HORIZON);
 
     // 山並み（パララックスつき）
+    const ak = HORIZON / 110; // 解像度スケールに山の高さを合わせる
     const span = 1920, segW = 80;
     for (const r of ridges) {
       let offset = (heading * r.speed) % span;
@@ -1163,7 +1327,7 @@
         const f = (pan % segW) / segW;
         const hA = r.peaks[i % 24], hB = r.peaks[(i + 1) % 24];
         const hv = hA + (hB - hA) * f;
-        ctx.lineTo(x, HORIZON - r.amp * hv);
+        ctx.lineTo(x, HORIZON - r.amp * ak * hv);
       }
       ctx.lineTo(W, HORIZON);
       ctx.closePath();
@@ -1176,8 +1340,8 @@
           while (px < -segW) px += span;
           while (px > span - segW) px -= span;
           if (px < -20 || px > W + 20) continue;
-          const py = HORIZON - r.amp * r.peaks[i];
-          const cap = r.amp * r.peaks[i] * 0.32;
+          const py = HORIZON - r.amp * ak * r.peaks[i];
+          const cap = r.amp * ak * r.peaks[i] * 0.32;
           ctx.beginPath();
           ctx.moveTo(px, py);
           ctx.lineTo(px - cap * 0.8, py + cap);
@@ -1194,7 +1358,7 @@
       const base = i * cspan / 6;
       let x = (base - heading / (Math.PI * 2) * cspan) % cspan;
       if (x < 0) x += cspan;
-      ctx.drawImage(cloudSprite, x - 44, ((i * 37) % 40) - 12, 28, 28);
+      ctx.drawImage(cloudSprite, x - 52, ((i * 37) % 44) + 6, 34, 34);
     }
   }
 
@@ -1276,10 +1440,14 @@
     ctx.save();
     ctx.translate(x, y);
     if (k.spin > 0) ctx.rotate(Math.sin(k.spin * 18) * 0.7);
-    // 影
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    // 影（ソフト）
+    const shadow = ctx.createRadialGradient(0, h * 0.02, 0, 0, h * 0.02, w * 0.52);
+    shadow.addColorStop(0, 'rgba(0,0,0,0.34)');
+    shadow.addColorStop(0.7, 'rgba(0,0,0,0.15)');
+    shadow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = shadow;
     ctx.beginPath();
-    ctx.ellipse(0, 0, w * 0.45, h * 0.16, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, h * 0.02, w * 0.52, h * 0.2, 0, 0, Math.PI * 2);
     ctx.fill();
     // ブースト炎
     if (k.boost > 0) {
