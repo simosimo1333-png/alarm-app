@@ -84,8 +84,9 @@
     },
     {
       name: '白川郷 雪のサーキット',
-      desc: '合掌造りの里・白川郷をめぐる雪道コース。ハンドルが少しすべる！',
+      desc: '合掌造りの里・白川郷をめぐる雪道コース。ところどころ雪のダートですべる！',
       stars: 2, laps: 3, roadW: 76, turnMul: 0.85,
+      dirt: { sections: 6, len: 9, mul: 0.68 },
       ctrl: [
         [220, 150], [560, 110], [860, 200], [900, 450], [780, 650],
         [820, 870], [560, 920], [300, 840], [330, 650], [450, 540],
@@ -101,6 +102,27 @@
           { color: '#aac4d4', amp: 20, speed: 110, snow: true },
         ],
         deco: [['gassho', 3], ['snowtree', 3], ['snowman', 1]],
+      },
+    },
+    {
+      name: '乗鞍スカイライン',
+      desc: '雲の上を走る天空の山岳道路。ながれるような高速コーナーが続く。',
+      stars: 2, laps: 3, roadW: 72,
+      ctrl: [
+        [200, 140], [520, 100], [840, 160], [920, 400], [800, 560],
+        [880, 760], [680, 910], [420, 820], [240, 900], [120, 720],
+        [230, 560], [120, 400], [160, 220],
+      ],
+      theme: {
+        grassA: '#6b7d62', grassB: '#5f7057',
+        road: '#4c5258', curbA: '#f9a825', curbB: '#ffffff',
+        line: 'rgba(255,255,255,0.55)',
+        skyTop: '#1565c0', skyBot: '#bbdefb', fog: '227,242,253',
+        ridges: [
+          { color: '#e3edf4', amp: 42, speed: 60, snow: true },
+          { color: '#90a8ba', amp: 26, speed: 110, snow: true },
+        ],
+        deco: [['rock', 3], ['snowtree', 2], ['goat', 1]],
       },
     },
     {
@@ -137,6 +159,7 @@
   let wps = [];          // {x, y, tx, ty} 接線つきウェイポイント
   let texData32 = null;  // Uint32Array (ABGR)
   let roadMask = null;   // Uint8Array 1=道路
+  let dirtMask = null;   // Uint8Array 1=雪のダート（コースによる）
   let outA32 = 0, outB32 = 0; // テクスチャ範囲外の市松色
   let decorations = [];  // 沿道の飾り {x, y, type, size}
   let ridges = [];       // 山並み（パララックス）
@@ -193,6 +216,59 @@
     c.closePath();
   }
 
+  function traceSegment(c, start, len) {
+    c.beginPath();
+    c.moveTo(wps[start % N_WP].x, wps[start % N_WP].y);
+    for (let i = 1; i <= len; i++) {
+      const w = wps[(start + i) % N_WP];
+      c.lineTo(w.x, w.y);
+    }
+  }
+
+  // 雪のダート区間を路面の上に描き、判定マスクも作る
+  function buildDirt(t) {
+    dirtMask = null;
+    if (!course.dirt) return;
+    const mc = document.createElement('canvas');
+    mc.width = mc.height = TEX;
+    const m = mc.getContext('2d');
+    m.fillStyle = '#000';
+    m.fillRect(0, 0, TEX, TEX);
+    m.lineJoin = m.lineCap = 'round';
+    m.strokeStyle = '#fff';
+    m.lineWidth = ROADW - 4;
+
+    t.lineJoin = t.lineCap = 'round';
+    const n = course.dirt.sections;
+    for (let s = 0; s < n; s++) {
+      // スタートライン付近（wp 0 前後）は避けて配置
+      const start = Math.floor(30 + (s * (N_WP - 70)) / n + Math.random() * 14);
+      const len = course.dirt.len + Math.floor(Math.random() * 5);
+
+      traceSegment(t, start, len);
+      t.strokeStyle = '#edf3f6';
+      t.lineWidth = ROADW - 4;
+      t.stroke();
+      // 雪の質感（薄い影のまだら）
+      for (let j = 0; j < 40; j++) {
+        const w = wps[(start + Math.floor(Math.random() * len)) % N_WP];
+        const rx = -w.ty, ry = w.tx;
+        const lat = (Math.random() - 0.5) * (ROADW - 18);
+        t.fillStyle = 'rgba(160,180,190,0.5)';
+        t.beginPath();
+        t.arc(w.x + rx * lat, w.y + ry * lat, 1 + Math.random() * 2.5, 0, Math.PI * 2);
+        t.fill();
+      }
+
+      traceSegment(m, start, len);
+      m.stroke();
+    }
+
+    const md = m.getImageData(0, 0, TEX, TEX).data;
+    dirtMask = new Uint8Array(TEX * TEX);
+    for (let i = 0; i < TEX * TEX; i++) dirtMask[i] = md[i * 4] > 128 ? 1 : 0;
+  }
+
   function buildTexture() {
     const tc = document.createElement('canvas');
     tc.width = tc.height = TEX;
@@ -234,6 +310,9 @@
     t.setLineDash([22, 26]);
     t.stroke();
     t.setLineDash([]);
+
+    // 雪のダート区間（センターラインの上、スタートラインの下に描く）
+    buildDirt(t);
 
     // スタートライン（市松）
     {
@@ -279,6 +358,13 @@
     const xi = x | 0, yi = y | 0;
     if (xi < 0 || yi < 0 || xi >= TEX || yi >= TEX) return false;
     return roadMask[yi * TEX + xi] === 1;
+  }
+
+  function isDirt(x, y) {
+    if (!dirtMask) return false;
+    const xi = x | 0, yi = y | 0;
+    if (xi < 0 || yi < 0 || xi >= TEX || yi >= TEX) return false;
+    return dirtMask[yi * TEX + xi] === 1;
   }
 
   // ===== 沿道の飾りスプライト =====
@@ -406,6 +492,27 @@
     return c;
   }
 
+  function makeRockSprite() {
+    const c = document.createElement('canvas');
+    c.width = 60;
+    c.height = 44;
+    const g = c.getContext('2d');
+    g.fillStyle = '#78909c';
+    g.beginPath();
+    g.moveTo(6, 42); g.lineTo(2, 26); g.lineTo(14, 12); g.lineTo(34, 6);
+    g.lineTo(52, 16); g.lineTo(58, 32); g.lineTo(50, 42);
+    g.closePath(); g.fill();
+    g.fillStyle = '#90a4ae';
+    g.beginPath();
+    g.moveTo(14, 12); g.lineTo(34, 6); g.lineTo(42, 14); g.lineTo(22, 22);
+    g.closePath(); g.fill();
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    g.beginPath();
+    g.moveTo(6, 42); g.lineTo(50, 42); g.lineTo(52, 36); g.lineTo(8, 34);
+    g.closePath(); g.fill();
+    return c;
+  }
+
   const DECO = {
     tree:     { img: makeTreeSprite('#2e7d32', '#1b5e20', false), w: 46 },
     autumn:   { img: makeTreeSprite('#ef6c00', '#bf360c', false), w: 46 },
@@ -413,9 +520,11 @@
     gassho:   { img: makeGasshoSprite(), w: 120 },
     machiya:  { img: makeMachiyaSprite(), w: 100 },
     onsen:    { img: makeOnsenSprite(), w: 36 },
+    rock:     { img: makeRockSprite(), w: 50 },
     cow:      { emoji: '🐄', w: 26 },
     lantern:  { emoji: '🏮', w: 20 },
     snowman:  { emoji: '⛄', w: 30 },
+    goat:     { emoji: '🐐', w: 24 },
   };
 
   function buildDecorations() {
@@ -692,7 +801,9 @@
     }
 
     const onRoad = isRoad(k.x, k.y);
+    const onDirt = onRoad && isDirt(k.x, k.y);
     let limit = MAX_SPEED * k.skill * (onRoad ? 1 : OFFROAD_MUL);
+    if (onDirt) limit *= course.dirt.mul;
 
     // CPUのラバーバンド（プレイヤーとの差を緩やかに詰める/緩める）
     if (!k.isPlayer && player && !player.finished) {
@@ -715,7 +826,7 @@
     if (!gas && !brake && Math.abs(k.speed) < 4) k.speed = 0;
 
     const speedFactor = Math.min(1, Math.abs(k.speed) / (MAX_SPEED * 0.45));
-    const turnMul = course.turnMul || 1;
+    const turnMul = (course.turnMul || 1) * (onDirt ? 0.85 : 1);
     k.a += steer * TURN_RATE * turnMul * speedFactor * Math.sign(k.speed || 1) * dt;
 
     k.x += Math.cos(k.a) * k.speed * dt;
@@ -936,9 +1047,13 @@
           ctx.fillText(spec.emoji, it.x, it.y);
         }
       } else if (it.type === 'box') {
+        // 至近距離では巨大化して自機に重なるのでフェードアウト
+        const fade = Math.min(1, (it.fz - 30) / 50);
+        if (fade <= 0) continue;
         const s = 26 * it.scale;
         const bob = Math.sin(performance.now() / 250 + it.fz) * s * 0.08;
         ctx.save();
+        ctx.globalAlpha = fade;
         ctx.translate(it.x, it.y - s / 2 + bob);
         ctx.fillStyle = `hsla(${(performance.now() / 12) % 360}, 80%, 60%, 0.85)`;
         ctx.strokeStyle = 'rgba(255,255,255,0.9)';
@@ -997,6 +1112,19 @@
     ctx.translate(-pr.x, -pr.y);
     drawKart(player, pr.x, pr.y, pr.scale);
     ctx.restore();
+    // 雪のダート走行中は雪しぶき
+    if (isDirt(player.x, player.y) && Math.abs(player.speed) > 60) {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      for (let i = 0; i < 6; i++) {
+        ctx.beginPath();
+        ctx.arc(
+          pr.x + (Math.random() - 0.5) * 130,
+          pr.y + 2 + Math.random() * 14,
+          1.5 + Math.random() * 3, 0, Math.PI * 2
+        );
+        ctx.fill();
+      }
+    }
   }
 
   function renderFog() {
@@ -1171,4 +1299,12 @@
   // ===== 初期化 =====
   selectCourse(0);
   requestAnimationFrame(loop);
+
+  // 観戦モードでは検証用に最低限の状態を公開
+  if (DEMO) {
+    window.__kart = {
+      get player() { return player; },
+      isDirt, isRoad,
+    };
+  }
 })();
