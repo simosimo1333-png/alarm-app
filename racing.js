@@ -28,6 +28,7 @@
   const mmCtx = mmCanvas.getContext('2d');
   const hud = document.getElementById('hud');
   const hudPos = document.getElementById('hud-pos');
+  const hudName = document.getElementById('hud-name');
   const hudLap = document.getElementById('hud-lap');
   const hudTime = document.getElementById('hud-time');
   const hudSpeed = document.getElementById('hud-speed');
@@ -712,6 +713,29 @@
   const bananaSprite = makeEmojiSprite('🍌');
   const starSprite = makeEmojiSprite('★', '#fff');
 
+  // 雪玉（飛び道具）
+  function makeSnowballSprite() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 44;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(17, 15, 3, 22, 22, 20);
+    rg.addColorStop(0, '#ffffff');
+    rg.addColorStop(0.7, '#e8f2f8');
+    rg.addColorStop(1, '#b9cfdd');
+    g.fillStyle = rg;
+    g.beginPath();
+    g.arc(22, 22, 19, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = 'rgba(160,185,200,0.6)';
+    for (const [x, y, r] of [[14, 24, 2], [28, 16, 1.6], [24, 30, 1.8]]) {
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+    }
+    return c;
+  }
+  const snowballSprite = makeSnowballSprite();
+
   // ふんわりした雲（絵文字よりやわらかい見た目に）
   function makeCloudSprite() {
     const c = document.createElement('canvas');
@@ -1038,10 +1062,68 @@
   let player = null;
   let itemBoxes = [];
   let bananas = [];
+  let shots = [];        // 雪玉（飛び道具）
+  let flashT = 0;        // かみなりを受けたときの画面フラッシュ
   let state = 'title';   // title | count | race | finished
   let countT = 0;
   let raceTime = 0;
   let finishOrder = [];
+
+  const ITEM_ICONS = {
+    boost: '🚀',
+    banana: '🍌',
+    snowball: '❄️',
+    zap: '⚡',
+    shield: '🛡️',
+  };
+
+  // 順位が後ろのカートほど強いアイテムが出やすい
+  function rollItem(k) {
+    const behind = rankOf(k).rank > karts.length / 2;
+    const x = Math.random();
+    if (behind) {
+      if (x < 0.32) return 'boost';
+      if (x < 0.52) return 'snowball';
+      if (x < 0.64) return 'banana';
+      if (x < 0.82) return 'zap';
+      return 'shield';
+    }
+    if (x < 0.22) return 'boost';
+    if (x < 0.5) return 'snowball';
+    if (x < 0.76) return 'banana';
+    if (x < 0.92) return 'shield';
+    return 'zap';
+  }
+
+  // プレイヤー名（入力欄 + localStorage）
+  const nameInput = document.getElementById('player-name');
+  try { nameInput.value = localStorage.getItem('kartPlayerName') || ''; } catch (e) { /* プライベートモード等 */ }
+  nameInput.addEventListener('input', () => {
+    try { localStorage.setItem('kartPlayerName', nameInput.value); } catch (e) { /* 同上 */ }
+  });
+  function getPlayerName() {
+    return nameInput.value.trim().slice(0, 8) || 'あなた';
+  }
+
+  // カートの上に出す名前ラベル（毎フレームfillTextせず一度だけ描く）
+  function makeLabelSprite(name) {
+    const c = document.createElement('canvas');
+    const probe = c.getContext('2d');
+    probe.font = 'bold 26px sans-serif';
+    c.width = Math.ceil(probe.measureText(name).width) + 20;
+    c.height = 38;
+    const g = c.getContext('2d');
+    g.font = 'bold 26px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.lineJoin = 'round';
+    g.lineWidth = 6;
+    g.strokeStyle = 'rgba(0,0,0,0.6)';
+    g.strokeText(name, c.width / 2, 20);
+    g.fillStyle = '#fff';
+    g.fillText(name, c.width / 2, 20);
+    return c;
+  }
 
   const CPU_DEFS = [
     { name: 'レッド', body: '#e53935', helmet: '#ffeb3b', skill: 0.97 },
@@ -1056,6 +1138,7 @@
       name: def.name,
       isPlayer,
       sprite: makeKartSprite(def.body, def.helmet),
+      label: makeLabelSprite(def.name),
       color: def.body,
       skill: def.skill || 1,
       x: w.x + rx * lateral,
@@ -1067,6 +1150,7 @@
       item: null,
       boost: 0,
       spin: 0,
+      shield: 0,
       aiItemT: 0,
       finished: false,
     };
@@ -1075,9 +1159,11 @@
   function resetRace(vs) {
     karts = [];
     bananas = [];
+    shots = [];
     finishOrder = [];
     raceTime = 0;
     steerSmooth = 0;
+    flashT = 0;
     remoteTarget = null;
     remoteFinish = null;
 
@@ -1085,21 +1171,23 @@
     if (vs) {
       // 対戦: 自分と相手の2台。ホストが左、ゲストが右
       const myLat = netRole === 'host' ? -22 : 22;
-      remoteKart = spawnKart({ name: 'あいて', body: '#1e88e5', helmet: '#fff' }, grid, -myLat, false);
+      remoteKart = spawnKart({ name: remoteName || 'あいて', body: '#1e88e5', helmet: '#fff' }, grid, -myLat, false);
       remoteKart.remote = true;
-      player = spawnKart({ name: 'あなた', body: '#e94560', helmet: '#fff' }, grid, myLat, true);
+      player = spawnKart({ name: getPlayerName(), body: '#e94560', helmet: '#fff' }, grid, myLat, true);
       karts.push(remoteKart, player);
     } else {
       remoteKart = null;
       karts.push(spawnKart(CPU_DEFS[0], grid + 4, -22, false));
       karts.push(spawnKart(CPU_DEFS[1], grid + 4, 22, false));
       karts.push(spawnKart(CPU_DEFS[2], grid, -22, false));
-      player = spawnKart({ name: 'あなた', body: '#e94560', helmet: '#fff' }, grid, 22, true);
+      player = spawnKart({ name: getPlayerName(), body: '#e94560', helmet: '#fff' }, grid, 22, true);
       karts.push(player);
     }
+    hudName.textContent = player.name;
 
     itemBoxes = [];
-    for (let i = 50; i < N_WP; i += 100) {
+    // スタートグリッド付近（終端60wp）には置かない
+    for (let i = 50; i < N_WP - 60; i += 100) {
       const w = wps[i];
       const rx = -w.ty, ry = w.tx;
       for (const off of [-ROADW * 0.3, 0, ROADW * 0.3]) {
@@ -1197,6 +1285,7 @@
 
   function updateKart(k, dt) {
     k.wallT = Math.max(0, (k.wallT || 0) - dt);
+    k.shield = Math.max(0, (k.shield || 0) - dt);
     if (k.spin > 0) {
       k.spin -= dt;
       k.a += dt * 10;
@@ -1266,13 +1355,28 @@
     }
   }
 
+  // かみなりを受けたときの処理（シールドで防げる）
+  function zapKart(o) {
+    if (o.shield > 0 || o.finished) return;
+    o.spin = Math.max(o.spin, 0.8);
+    o.speed *= 0.4;
+    if (o.isPlayer) {
+      flashT = 0.3;
+      beep(90, 0.45, 0.18, 'sawtooth');
+      buzz([80, 60, 80]);
+    }
+  }
+
   function useItem(k) {
     if (!k.item) return;
+    const item = k.item;
+    k.item = null;
     if (k.isPlayer) buzz(30);
-    if (k.item === 'boost') {
+
+    if (item === 'boost') {
       k.boost = 1.6;
       if (k.isPlayer) beep(880, 0.3, 0.12, 'sawtooth');
-    } else if (k.item === 'banana') {
+    } else if (item === 'banana') {
       const bn = {
         x: k.x - Math.cos(k.a) * 42,
         y: k.y - Math.sin(k.a) * 42,
@@ -1284,8 +1388,35 @@
         beep(330, 0.15);
         if (bn.id) netSend({ t: 'banana', x: bn.x, y: bn.y, id: bn.id });
       }
+    } else if (item === 'snowball') {
+      // 前方にまっすぐ飛ぶ雪玉。当たるとスピン
+      const sp = Math.max(k.speed, 0) + 360;
+      const s = {
+        x: k.x + Math.cos(k.a) * 34,
+        y: k.y + Math.sin(k.a) * 34,
+        vx: Math.cos(k.a) * sp,
+        vy: Math.sin(k.a) * sp,
+        life: 2.5,
+        owner: k,
+        id: k.isPlayer && vsMode ? `${netRole}-s${++netBananaSeq}` : null,
+      };
+      shots.push(s);
+      if (k.isPlayer) {
+        beep(520, 0.12, 0.12, 'triangle');
+        if (s.id) netSend({ t: 'shot', x: s.x, y: s.y, vx: s.vx, vy: s.vy, id: s.id });
+      }
+    } else if (item === 'shield') {
+      k.shield = 6;
+      if (k.isPlayer) beep(740, 0.2, 0.1, 'sine');
+    } else if (item === 'zap') {
+      // 自分以外の全カートを感電させる
+      if (k.isPlayer && vsMode) netSend({ t: 'zap' });
+      for (const o of karts) {
+        if (o === k || o.remote) continue; // 相手側は相手の画面で判定
+        zapKart(o);
+      }
+      if (k.isPlayer) beep(150, 0.3, 0.14, 'square');
     }
-    k.item = null;
   }
 
   function updateWorld(dt) {
@@ -1320,7 +1451,7 @@
       for (const k of karts) {
         if (k.remote || k.item || k.finished) continue;
         if (Math.hypot(k.x - box.x, k.y - box.y) < 22) {
-          k.item = Math.random() < 0.6 ? 'boost' : 'banana';
+          k.item = rollItem(k);
           k.aiItemT = 1.5 + Math.random() * 3;
           box.respawn = 4;
           if (k.isPlayer) {
@@ -1341,11 +1472,39 @@
       for (const k of karts) {
         if (k.remote || k.spin > 0) continue;
         if (Math.hypot(k.x - bn.x, k.y - bn.y) < 20) {
-          k.spin = 1;
-          k.speed *= 0.25;
+          if (k.shield > 0) {
+            if (k.isPlayer) beep(700, 0.1, 0.1, 'sine'); // シールドで防いだ
+          } else {
+            k.spin = 1;
+            k.speed *= 0.25;
+            if (k.isPlayer) { beep(180, 0.4, 0.15, 'sawtooth'); buzz([60, 50, 60]); }
+          }
           if (bn.id) netSend({ t: 'bhit', id: bn.id });
           bananas.splice(i, 1);
-          if (k.isPlayer) { beep(180, 0.4, 0.15, 'sawtooth'); buzz([60, 50, 60]); }
+          break;
+        }
+      }
+    }
+
+    // 雪玉（ガードレールに当たると割れる）
+    for (let i = shots.length - 1; i >= 0; i--) {
+      const s = shots[i];
+      s.life -= dt;
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      if (s.life <= 0 || !isRoad(s.x, s.y)) { shots.splice(i, 1); continue; }
+      for (const k of karts) {
+        if (k.remote || k === s.owner || k.spin > 0) continue;
+        if (Math.hypot(k.x - s.x, k.y - s.y) < 24) {
+          if (k.shield > 0) {
+            if (k.isPlayer) beep(700, 0.1, 0.1, 'sine');
+          } else {
+            k.spin = 1;
+            k.speed *= 0.25;
+            if (k.isPlayer) { beep(180, 0.4, 0.15, 'sawtooth'); buzz([60, 50, 60]); }
+          }
+          if (s.id) netSend({ t: 'shotHit', id: s.id });
+          shots.splice(i, 1);
           break;
         }
       }
@@ -1366,6 +1525,7 @@
     }
     k.boost = Math.max(0, k.boost - dt);
     k.spin = Math.max(0, k.spin - dt);
+    k.shield = Math.max(0, k.shield - dt);
   }
 
   // ===== レンダリング =====
@@ -1510,6 +1670,10 @@
       const pr = project(camX, camY, dirX, dirY, bn.x, bn.y);
       if (pr) items.push({ ...pr, type: 'banana' });
     }
+    for (const s of shots) {
+      const pr = project(camX, camY, dirX, dirY, s.x, s.y);
+      if (pr) items.push({ ...pr, type: 'shot' });
+    }
     for (const k of karts) {
       if (k.isPlayer) continue;
       const pr = project(camX, camY, dirX, dirY, k.x, k.y);
@@ -1546,6 +1710,13 @@
       } else if (it.type === 'banana') {
         const s = 20 * it.scale;
         ctx.drawImage(bananaSprite, it.x - s / 2, it.y - s, s, s);
+      } else if (it.type === 'shot') {
+        const s = 17 * it.scale;
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
+        ctx.beginPath();
+        ctx.ellipse(it.x, it.y, s * 0.42, s * 0.16, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.drawImage(snowballSprite, it.x - s / 2, it.y - s * 1.2, s, s);
       } else {
         drawKart(it.kart, it.x, it.y, it.scale);
       }
@@ -1575,7 +1746,26 @@
       ctx.fill();
     }
     ctx.drawImage(k.sprite, -w / 2, -h, w, h);
+    // シールド（切れる直前は点滅）
+    if (k.shield > 0) {
+      const alpha = k.shield < 1.5
+        ? 0.35 + 0.3 * Math.sin(performance.now() / 70)
+        : 0.7;
+      ctx.strokeStyle = `rgba(80,220,255,${Math.max(0.15, alpha)})`;
+      ctx.lineWidth = Math.max(2, w * 0.045);
+      ctx.beginPath();
+      ctx.ellipse(0, -h * 0.45, w * 0.64, h * 0.66, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(80,220,255,0.1)';
+      ctx.fill();
+    }
     ctx.restore();
+    // 名前ラベル（自分以外。スピンしても回らないよう外で描く）
+    if (!k.isPlayer && k.label) {
+      const lw = Math.min(120, k.label.width * scale * 0.42);
+      const lh = lw * k.label.height / k.label.width;
+      ctx.drawImage(k.label, x - lw / 2, y - h - lh - 3 * scale, lw, lh);
+    }
   }
 
   function renderPlayer() {
@@ -1674,6 +1864,11 @@
     renderSprites(camX, camY, dirX, dirY);
     renderPlayer();
     ctx.drawImage(vignette, 0, 0);
+    // かみなりを受けたときのフラッシュ
+    if (flashT > 0) {
+      ctx.fillStyle = `rgba(255,255,180,${Math.min(0.65, flashT * 2.2)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
     renderMinimap();
   }
 
@@ -1702,7 +1897,7 @@
     hudLap.textContent = `LAP ${Math.min(Math.max(player.lap, 1), LAPS)}/${LAPS}`;
     hudTime.textContent = fmtTime(raceTime);
     hudSpeed.textContent = `${Math.max(0, Math.round(player.speed * 0.6))} km/h`;
-    const icon = player.item === 'boost' ? '🚀' : player.item === 'banana' ? '🍌' : '';
+    const icon = ITEM_ICONS[player.item] || '';
     hudItem.textContent = icon;
     tcItem.textContent = icon || '🎁';
     tcItem.classList.toggle('has-item', !!icon);
@@ -1758,6 +1953,7 @@
   let remoteKart = null;
   let remoteTarget = null; // 相手の最新状態
   let remoteFinish = null;
+  let remoteName = null;   // 相手のプレイヤー名
   let netBananaSeq = 0;
   let lastNetSend = 0;
   let roomCode = null;
@@ -1847,7 +2043,7 @@
     const cbs = {
       onOpen: (conn) => {
         net = conn;
-        if (role === 'guest') net.send({ t: 'join' });
+        if (role === 'guest') net.send({ t: 'join', name: getPlayerName() });
       },
       onMsg: onNetMsg,
       onClose: onNetClosed,
@@ -1858,9 +2054,11 @@
   function onNetMsg(m) {
     if (!m || !m.t) return;
     if (m.t === 'join' && netRole === 'host' && !vsMode) {
-      netSendRaw({ t: 'start', course: courseIdx, seed: courseSeed });
+      remoteName = (m.name || '').slice(0, 8) || 'あいて';
+      netSendRaw({ t: 'start', course: courseIdx, seed: courseSeed, name: getPlayerName() });
       beginVersus();
     } else if (m.t === 'start' && netRole === 'guest' && !vsMode) {
+      remoteName = (m.name || '').slice(0, 8) || 'あいて';
       buildCourse(m.course, m.seed);
       courseBtns.forEach((b, j) => b.classList.toggle('selected', j === m.course));
       beginVersus();
@@ -1870,6 +2068,7 @@
       remoteKart.lap = m.lap;
       if (m.b) remoteKart.boost = 0.2;
       if (m.n) remoteKart.spin = 0.2;
+      if (m.sh) remoteKart.shield = 0.3;
       if (m.lap > LAPS && !remoteKart.finished) {
         remoteKart.finished = true;
         finishOrder.push(remoteKart);
@@ -1879,6 +2078,13 @@
     } else if (m.t === 'bhit') {
       const i = bananas.findIndex((b) => b.id === m.id);
       if (i >= 0) bananas.splice(i, 1);
+    } else if (m.t === 'shot') {
+      shots.push({ x: m.x, y: m.y, vx: m.vx, vy: m.vy, life: 2.5, owner: remoteKart, id: m.id });
+    } else if (m.t === 'shotHit') {
+      const i = shots.findIndex((s) => s.id === m.id);
+      if (i >= 0) shots.splice(i, 1);
+    } else if (m.t === 'zap') {
+      zapKart(player);
     } else if (m.t === 'box') {
       if (itemBoxes[m.i]) itemBoxes[m.i].respawn = 4;
     } else if (m.t === 'fin') {
@@ -1934,6 +2140,7 @@
       wp: player.wp, lap: player.lap,
       b: player.boost > 0 ? 1 : 0,
       n: player.spin > 0 ? 1 : 0,
+      sh: player.shield > 0 ? 1 : 0,
     });
   }
 
@@ -1993,6 +2200,7 @@
       netTick(now);
     }
 
+    flashT = Math.max(0, flashT - dt);
     if (state !== 'title') {
       render();
       updateHud();
@@ -2011,6 +2219,8 @@
     get karts() { return karts; },
     get room() { return roomCode; },
     get state() { return state; },
+    get shots() { return shots; },
+    give: (t) => { if (player) player.item = t; },
     texURL: () => texCanvas.toDataURL(),
     isDirt, isRoad,
   };

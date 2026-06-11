@@ -88,6 +88,14 @@ h1 {
   font-size: 1rem;
 }
 
+#hud-name {
+  font-size: 0.85rem;
+  color: #9fe8ff;
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 .hud-right {
   position: absolute;
   bottom: 10px;
@@ -204,6 +212,34 @@ h1 {
 .panel-text .q {
   color: #ffd54a;
   font-weight: bold;
+}
+
+/* ---- なまえ入力 ---- */
+#name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#name-row label {
+  font-size: 0.85rem;
+  color: #aaa;
+}
+
+#player-name {
+  width: 130px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 0.95rem;
+  text-align: center;
+  outline: none;
+}
+
+#player-name:focus {
+  border-color: #e94560;
 }
 
 #start-btn {
