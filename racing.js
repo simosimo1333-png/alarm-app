@@ -68,7 +68,7 @@
     },
     {
       name: '高山 古い町並みGP',
-      desc: '城下町・高山の古い町並みを夕暮れにめぐる市街地コース。',
+      desc: '夕暮れの城下町。町家・祭屋台・さるぼぼ・みたらし団子がお出迎え。',
       stars: 2, laps: 3, roadW: 120,
       // 先頭はスタート地点。直線区間に置く（急コーナー上だとwp追跡が乱れる）
       ctrl: [
@@ -86,7 +86,7 @@
           { color: '#9b8aa8', amp: 26, speed: 60 },
           { color: '#7c6b91', amp: 18, speed: 110 },
         ],
-        deco: [['machiya', 4], ['sakagura', 2], ['yatai', 1], ['lantern', 2], ['nakabashi', 1]],
+        deco: [['machiya', 3], ['sakagura', 2], ['yatai', 1], ['lantern', 1], ['nakabashi', 1], ['sarubobo', 2], ['dango', 1], ['torii', 1]],
         ambient: 'sakura', skyFx: 'fireworks',
       },
     },
@@ -180,6 +180,9 @@
   let skyGrad = null;
   let fogGrad = null;
   let hazeGrad = null;
+  let hillSlope = [];    // 各wpの坂の勾配（登り>0）
+  let horY = HORIZON;    // 坂で上下する動的な地平線
+  let pads = [];         // ダッシュボード/ジャンプ台 {start, len, type}
 
   // オフスクリーンキャンバスとマスクは使い回す
   // （コース切替のたびに作り直すとモバイルでメモリを圧迫してクラッシュする）
@@ -374,6 +377,52 @@
 
     // 雪のダート区間（センターラインの上、スタートラインの下に描く）
     buildDirt(t);
+
+    // ダッシュボード / ジャンプ台
+    t.lineCap = 'butt';
+    for (const pad of pads) {
+      traceSegment(t, pad.start, pad.len);
+      t.strokeStyle = pad.type === 'dash' ? '#ff8f00' : '#3949ab';
+      t.lineWidth = ROADW - 10;
+      t.stroke();
+      if (pad.type === 'dash') {
+        // 進行方向の矢羽根
+        t.strokeStyle = '#fff';
+        t.lineWidth = 5;
+        for (let j = 1; j < pad.len; j += 2) {
+          const w = wps[(pad.start + j) % N_WP];
+          const rx = -w.ty, ry = w.tx;
+          const span = ROADW * 0.26;
+          t.beginPath();
+          t.moveTo(w.x - rx * span - w.tx * 10, w.y - ry * span - w.ty * 10);
+          t.lineTo(w.x + w.tx * 8, w.y + w.ty * 8);
+          t.lineTo(w.x + rx * span - w.tx * 10, w.y + ry * span - w.ty * 10);
+          t.stroke();
+        }
+      } else {
+        // 横縞 + 踏み切りの黄色いふち
+        t.strokeStyle = 'rgba(255,255,255,0.85)';
+        t.lineWidth = 3;
+        for (let j = 0; j < pad.len; j++) {
+          const w = wps[(pad.start + j) % N_WP];
+          const rx = -w.ty, ry = w.tx;
+          const span = ROADW * 0.4;
+          t.beginPath();
+          t.moveTo(w.x - rx * span, w.y - ry * span);
+          t.lineTo(w.x + rx * span, w.y + ry * span);
+          t.stroke();
+        }
+        const lip = wps[(pad.start + pad.len) % N_WP];
+        const rx = -lip.ty, ry = lip.tx;
+        t.strokeStyle = '#ffd54a';
+        t.lineWidth = 8;
+        t.beginPath();
+        t.moveTo(lip.x - rx * ROADW * 0.42, lip.y - ry * ROADW * 0.42);
+        t.lineTo(lip.x + rx * ROADW * 0.42, lip.y + ry * ROADW * 0.42);
+        t.stroke();
+      }
+    }
+    t.lineCap = 'round';
 
     // スタートライン（市松・道幅いっぱい）
     {
@@ -683,6 +732,119 @@
     return c;
   }
 
+  function makeSaruboboSprite() {
+    // さるぼぼ（飛騨のお守り人形。顔がないのが特徴）
+    const c = document.createElement('canvas');
+    c.width = 56;
+    c.height = 76;
+    const g = c.getContext('2d');
+    // 頭巾（黒）
+    g.fillStyle = '#26221f';
+    g.beginPath();
+    g.moveTo(28, 2); g.lineTo(9, 27); g.lineTo(47, 27);
+    g.closePath(); g.fill();
+    // 顔（赤・のっぺらぼう）
+    g.fillStyle = '#d23a2e';
+    g.beginPath();
+    g.arc(28, 26, 13, 0, Math.PI * 2);
+    g.fill();
+    // 手足（バンザイのX字）
+    g.strokeStyle = '#d23a2e';
+    g.lineWidth = 11;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(28, 44); g.lineTo(7, 34);
+    g.moveTo(28, 44); g.lineTo(49, 34);
+    g.moveTo(28, 56); g.lineTo(11, 72);
+    g.moveTo(28, 56); g.lineTo(45, 72);
+    g.stroke();
+    // 胴体
+    g.fillStyle = '#d23a2e';
+    g.beginPath();
+    g.ellipse(28, 50, 15, 16, 0, 0, Math.PI * 2);
+    g.fill();
+    // 腹掛け（黒菱形）
+    g.fillStyle = '#26221f';
+    g.beginPath();
+    g.moveTo(28, 40); g.lineTo(38, 52); g.lineTo(28, 64); g.lineTo(18, 52);
+    g.closePath(); g.fill();
+    return c;
+  }
+
+  function makeDangoSprite() {
+    // みたらし団子の屋台（宮川朝市の名物）
+    const c = document.createElement('canvas');
+    c.width = 80;
+    c.height = 88;
+    const g = c.getContext('2d');
+    // 赤白の庇
+    for (let i = 0; i < 6; i++) {
+      g.fillStyle = i % 2 ? '#fff' : '#d23a2e';
+      g.fillRect(4 + i * 12, 10, 12, 16);
+    }
+    g.fillStyle = 'rgba(0,0,0,0.15)';
+    g.fillRect(4, 22, 72, 4);
+    // 柱とカウンター
+    g.fillStyle = '#8d6e63';
+    g.fillRect(8, 26, 5, 56);
+    g.fillRect(67, 26, 5, 56);
+    g.fillStyle = '#6d4c41';
+    g.fillRect(8, 60, 64, 22);
+    // 看板
+    g.fillStyle = '#fff8e1';
+    g.fillRect(20, 32, 28, 22);
+    g.strokeStyle = '#6d4c41';
+    g.lineWidth = 2;
+    g.strokeRect(20, 32, 28, 22);
+    g.fillStyle = '#5d4037';
+    g.font = 'bold 11px serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('だんご', 34, 43);
+    // みたらし団子の串
+    g.strokeStyle = '#a1887f';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(58, 28); g.lineTo(58, 58);
+    g.stroke();
+    g.fillStyle = '#c98e4a';
+    for (const y of [33, 43, 53]) {
+      g.beginPath();
+      g.arc(58, y, 6, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.fillStyle = 'rgba(255,255,255,0.45)';
+    for (const y of [31, 41, 51]) {
+      g.beginPath();
+      g.arc(56, y, 2, 0, Math.PI * 2);
+      g.fill();
+    }
+    return c;
+  }
+
+  function makeToriiSprite() {
+    // 桜山八幡宮の朱の鳥居
+    const c = document.createElement('canvas');
+    c.width = 84;
+    c.height = 76;
+    const g = c.getContext('2d');
+    g.fillStyle = '#c0392b';
+    // 柱
+    g.fillRect(14, 20, 9, 56);
+    g.fillRect(61, 20, 9, 56);
+    // 笠木（上の横木）と黒い屋根
+    g.fillRect(2, 10, 80, 9);
+    g.fillStyle = '#26221f';
+    g.fillRect(0, 7, 84, 5);
+    // 貫（下の横木）
+    g.fillStyle = '#c0392b';
+    g.fillRect(8, 28, 68, 7);
+    // 額束
+    g.fillStyle = '#fff8e1';
+    g.fillRect(37, 19, 10, 12);
+    return c;
+  }
+
   function makeNakabashiSprite() {
     // 中橋（宮川にかかる朱塗りの欄干）
     const c = document.createElement('canvas');
@@ -907,6 +1069,9 @@
     sakagura: { img: makeSakaguraSprite(), w: 98 },
     yatai:    { img: makeYataiSprite(), w: 60 },
     nakabashi:{ img: makeNakabashiSprite(), w: 106 },
+    sarubobo: { img: makeSaruboboSprite(), w: 42 },
+    dango:    { img: makeDangoSprite(), w: 66 },
+    torii:    { img: makeToriiSprite(), w: 82 },
     onsen:    { img: makeOnsenSprite(), w: 36 },
     rock:     { img: makeRockSprite(), w: 50 },
     cow:      { img: makeEmojiSprite('🐄'), w: 26 },
@@ -964,6 +1129,52 @@
     });
   }
 
+  // 坂のプロファイル（登り下りで地平線が上下する）
+  function buildHills() {
+    const a1 = 13 + rnd() * 9, p1 = rnd() * Math.PI * 2;
+    const a2 = 7 + rnd() * 6, p2 = rnd() * Math.PI * 2;
+    const hh = [];
+    for (let i = 0; i < N_WP; i++) {
+      hh.push(
+        a1 * Math.sin((i / N_WP) * Math.PI * 4 + p1) +
+        a2 * Math.sin((i / N_WP) * Math.PI * 10 + p2)
+      );
+    }
+    hillSlope = hh.map((v, i) => hh[(i + 4) % N_WP] - hh[(i - 4 + N_WP) % N_WP]);
+    horY = HORIZON;
+  }
+
+  // ダッシュボードとジャンプ台を「曲率の小さい場所」に自動配置
+  function buildPads() {
+    pads = [];
+    const isStraight = (i) => {
+      const a = wps[(i + 9) % N_WP], b = wps[(i - 9 + N_WP) % N_WP];
+      let d = Math.atan2(a.ty, a.tx) - Math.atan2(b.ty, b.tx);
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      return Math.abs(d) < 0.22;
+    };
+    const want = [
+      { at: 0.16, type: 'dash' }, { at: 0.3, type: 'jump' }, { at: 0.48, type: 'dash' },
+      { at: 0.66, type: 'jump' }, { at: 0.84, type: 'dash' },
+    ];
+    for (const w of want) {
+      const base = Math.round(w.at * N_WP);
+      let found = -1;
+      for (let off = 0; off < 45 && found < 0; off++) {
+        for (const s of [1, -1]) {
+          const i = (base + off * s + N_WP) % N_WP;
+          if (isStraight(i)) { found = i; break; }
+        }
+      }
+      if (found < 0) continue;
+      // アイテムボックスの列（wp 50,150,…）と重なったらずらす
+      const m = found % 100;
+      if (m >= 42 && m <= 60) found = (found + 16) % N_WP;
+      pads.push({ start: found, len: w.type === 'jump' ? 5 : 7, type: w.type });
+    }
+  }
+
   function buildCourse(idx, seed) {
     courseIdx = idx;
     course = COURSES[idx];
@@ -973,6 +1184,8 @@
     courseSeed = seed !== undefined ? seed : ((Math.random() * 0xffffffff) >>> 0);
     srand(courseSeed);
     buildTrack(course.ctrl);
+    buildHills();
+    buildPads();
     buildTexture();
     buildDecorations();
     buildSky();
@@ -1293,6 +1506,9 @@
       aiItemT: 0,
       stuckT: 0,
       reverseT: 0,
+      air: 0,
+      airTotal: 0.85,
+      padT: 0,
       finished: false,
     };
   }
@@ -1381,6 +1597,16 @@
       const dist = dx * dx + dy * dy;
       if (dist < bestD) { bestD = dist; best = i; }
     }
+    // 追跡を見失ったら全周を再探索して復帰（順位計算が壊れないように）
+    if (bestD > 90 * 90) {
+      for (let i = 0; i < N_WP; i++) {
+        const dx = wps[i].x - k.x, dy = wps[i].y - k.y;
+        const dist = dx * dx + dy * dy;
+        if (dist < bestD) { bestD = dist; best = i; }
+      }
+      k.wp = best; // 大ジャンプになるので周回判定はスキップ
+      return;
+    }
     const prev = k.wp;
     k.wp = best;
     // 周回判定（スタートラインをまたいだら ±1）
@@ -1412,26 +1638,41 @@
     }
     if (isRoad(nx, k.y)) { k.x = nx; return 1; }
     if (isRoad(k.x, ny)) { k.y = ny; return 1; }
+    // 正面衝突: 道なり方向へ滑らせて引っかかりを防ぐ
+    const w = wps[k.wp];
+    const sgn = (Math.cos(k.a) * w.tx + Math.sin(k.a) * w.ty) >= 0 ? 1 : -1;
+    const m = Math.hypot(dx, dy) * 0.7;
+    const sx = k.x + w.tx * sgn * m, sy = k.y + w.ty * sgn * m;
+    if (isRoad(sx, sy)) { k.x = sx; k.y = sy; return 1; }
     return 2;
   }
 
   function hitWall(k, kind, dt) {
-    if (kind === 1) {
-      k.speed *= Math.max(0, 1 - 2 * dt); // 壁ずりで減速
-    } else if (kind === 2) {
-      const hard = Math.abs(k.speed) > 80;
-      k.speed *= -0.25; // 小さく跳ね返る
-      if (k.isPlayer && hard && k.wallT <= 0) {
-        k.wallT = 0.5;
-        beep(110, 0.2, 0.18, 'square');
-        buzz(50);
-      }
+    if (!kind) return;
+    // 壁は「減速のみ」。道なりに向きを少し補正して壁から離れやすくする
+    const w = wps[k.wp];
+    const sgn = (Math.cos(k.a) * w.tx + Math.sin(k.a) * w.ty) >= 0 ? 1 : -1;
+    const ta = Math.atan2(w.ty * sgn, w.tx * sgn);
+    let da = ta - k.a;
+    while (da > Math.PI) da -= Math.PI * 2;
+    while (da < -Math.PI) da += Math.PI * 2;
+    k.a += da * Math.min(1, dt * 5);
+    k.speed *= Math.max(0, 1 - (kind === 2 ? 3.2 : 1.2) * dt);
+    if (k.isPlayer && kind === 2 && Math.abs(k.speed) > 130 && k.wallT <= 0) {
+      k.wallT = 0.5;
+      beep(110, 0.18, 0.15, 'square');
+      buzz(35);
     }
   }
 
   function updateKart(k, dt) {
     k.wallT = Math.max(0, (k.wallT || 0) - dt);
     k.shield = Math.max(0, (k.shield || 0) - dt);
+    k.padT = Math.max(0, (k.padT || 0) - dt);
+    if (k.air > 0) {
+      k.air -= dt;
+      if (k.air <= 0 && k.isPlayer) { buzz(25); beep(220, 0.08, 0.1, 'triangle'); } // 着地
+    }
     if (k.spin > 0) {
       k.spin -= dt;
       if (k.spin <= 0) {
@@ -1479,8 +1720,9 @@
       }
     }
 
+    const airborne = k.air > 0;
     const onRoad = isRoad(k.x, k.y);
-    const onDirt = onRoad && isDirt(k.x, k.y);
+    const onDirt = !airborne && onRoad && isDirt(k.x, k.y);
     let limit = MAX_SPEED * k.skill * (onRoad ? 1 : OFFROAD_MUL);
     if (onDirt) limit *= course.dirt.mul;
 
@@ -1492,22 +1734,27 @@
     }
     if (k.boost > 0) {
       k.boost -= dt;
-      limit *= BOOST_MUL;
-      k.speed += ACCEL * 2 * dt;
+      if (!airborne) {
+        limit *= BOOST_MUL;
+        k.speed += ACCEL * 2 * dt;
+      }
     }
 
-    if (gas) k.speed += ACCEL * dt;
-    else if (brake) k.speed -= BRAKE * dt;
-    else k.speed -= Math.sign(k.speed) * FRICTION * dt;
+    if (!airborne) {
+      // 空中ではアクセルも摩擦も効かない（勢いそのまま飛ぶ）
+      if (gas) k.speed += ACCEL * dt;
+      else if (brake) k.speed -= BRAKE * dt;
+      else k.speed -= Math.sign(k.speed) * FRICTION * dt;
 
-    if (k.speed > limit) k.speed = Math.max(limit, k.speed - BRAKE * 1.5 * dt);
-    if (k.speed < -120) k.speed = -120;
-    if (!gas && !brake && Math.abs(k.speed) < 4) k.speed = 0;
+      if (k.speed > limit) k.speed = Math.max(limit, k.speed - BRAKE * 1.5 * dt);
+      if (k.speed < -120) k.speed = -120;
+      if (!gas && !brake && Math.abs(k.speed) < 4) k.speed = 0;
+    }
 
     // 低速でも最低限ハンドルが効く（壁に正面から刺さっても抜けられる）
     let speedFactor = Math.min(1, Math.abs(k.speed) / (MAX_SPEED * 0.45));
     if (Math.abs(k.speed) > 5) speedFactor = Math.max(speedFactor, 0.3);
-    const turnMul = (course.turnMul || 1) * (onDirt ? 0.85 : 1);
+    const turnMul = (course.turnMul || 1) * (onDirt ? 0.85 : 1) * (airborne ? 0.25 : 1);
     k.a += steer * TURN_RATE * turnMul * speedFactor * Math.sign(k.speed || 1) * dt;
 
     hitWall(k, moveWithWalls(k, Math.cos(k.a) * k.speed * dt, Math.sin(k.a) * k.speed * dt), dt);
@@ -1515,6 +1762,27 @@
     k.y = Math.max(16, Math.min(TEX - 16, k.y));
 
     updateNearestWp(k);
+
+    // ダッシュボード / ジャンプ台
+    if (!airborne) {
+      for (const pad of pads) {
+        if ((k.wp - pad.start + N_WP) % N_WP >= pad.len) continue;
+        if (pad.type === 'dash') {
+          k.boost = Math.max(k.boost, 1.0);
+          if (k.isPlayer && k.padT <= 0) {
+            k.padT = 1;
+            beep(980, 0.15, 0.12, 'sawtooth');
+            buzz(20);
+          }
+        } else if (Math.abs(k.speed) > 60) {
+          k.air = 0.85;
+          k.airTotal = 0.85;
+          k.speed = Math.max(k.speed, MAX_SPEED * 0.85); // 踏み切りの勢い
+          if (k.isPlayer) { beep(620, 0.22, 0.12, 'triangle'); buzz(30); }
+        }
+        break;
+      }
+    }
 
     if (k.lap > LAPS && !k.finished) {
       k.finished = true;
@@ -1656,7 +1924,7 @@
       bn.arm -= dt;
       if (bn.arm > 0) continue;
       for (const k of karts) {
-        if (k.remote || k.spin > 0) continue;
+        if (k.remote || k.spin > 0 || k.air > 0) continue; // ジャンプ中は飛び越えられる
         if (Math.hypot(k.x - bn.x, k.y - bn.y) < 20) {
           if (!crashKart(k, 'banana', 1, 0.25) && k.isPlayer) {
             beep(700, 0.1, 0.1, 'sine'); // シールドで防いだ
@@ -1676,7 +1944,7 @@
       s.y += s.vy * dt;
       if (s.life <= 0 || !isRoad(s.x, s.y)) { shots.splice(i, 1); continue; }
       for (const k of karts) {
-        if (k.remote || k === s.owner || k.spin > 0) continue;
+        if (k.remote || k === s.owner || k.spin > 0 || k.air > 0) continue;
         if (Math.hypot(k.x - s.x, k.y - s.y) < 24) {
           if (!crashKart(k, 'snowball', 1, 0.25) && k.isPlayer) {
             beep(700, 0.1, 0.1, 'sine'); // シールドで防いだ
@@ -1704,18 +1972,20 @@
     k.boost = Math.max(0, k.boost - dt);
     k.spin = Math.max(0, k.spin - dt);
     k.shield = Math.max(0, k.shield - dt);
+    k.air = Math.max(0, k.air - dt);
   }
 
   // ===== レンダリング =====
-  const groundImg = ctx.createImageData(W, H - HORIZON);
+  const HOR_MIN = HORIZON - 36; // 坂で地平線が上がる分の余白
+  const groundImg = ctx.createImageData(W, H - HOR_MIN);
   const ground32 = new Uint32Array(groundImg.data.buffer);
 
-  function renderGround(camX, camY, dirX, dirY) {
+  function renderGround(camX, camY, dirX, dirY, hor) {
     const rxv = -dirY, ryv = dirX; // カメラの右方向
     const mipD = FOCAL * 1.2;      // これより遠い行は縮小テクスチャから読む
     let p = 0;
-    for (let y = HORIZON; y < H; y++) {
-      const rowD = (CAM_H * FOCAL) / (y - HORIZON + 1);
+    for (let y = hor; y < H; y++) {
+      const rowD = (CAM_H * FOCAL) / (y - hor + 1);
       const cx = camX + dirX * rowD;
       const cy = camY + dirY * rowD;
       const halfw = (rowD * (W / 2)) / FOCAL;
@@ -1748,12 +2018,15 @@
         }
       }
     }
-    ctx.putImageData(groundImg, 0, HORIZON);
+    ctx.putImageData(groundImg, 0, hor, 0, 0, W, H - hor);
   }
 
-  function renderSky(heading) {
+  function renderSky(heading, hor) {
+    // 坂による地平線の上下は、空全体を平行移動して表現する
+    ctx.save();
+    ctx.translate(0, hor - HORIZON);
     ctx.fillStyle = skyGrad;
-    ctx.fillRect(0, 0, W, HORIZON);
+    ctx.fillRect(0, -40, W, HORIZON + 40);
 
     // 太陽の光（山の向こうに見える）
     {
@@ -1869,6 +2142,7 @@
       const cw = 52 + (i % 3) * 26;
       ctx.drawImage(cloudSprite, x - cw, ((i * 41) % 64) + 8, cw, cw * 0.53);
     }
+    ctx.restore();
   }
 
   // 高山の夕空に上がる祭りの花火
@@ -1919,7 +2193,7 @@
     if (fz < 12) return null;
     return {
       x: W / 2 + (fx / fz) * FOCAL,
-      y: HORIZON + (CAM_H / fz) * FOCAL,
+      y: horY + (CAM_H / fz) * FOCAL,
       scale: FOCAL / fz,
       fz,
     };
@@ -1998,18 +2272,24 @@
   function drawKart(k, x, y, scale) {
     const w = 34 * scale;
     const h = w * (40 / 48);
+    // ジャンプ中は放物線で浮く（影は地面に残る）
+    const lift = k.air > 0 && k.airTotal
+      ? Math.sin(Math.PI * (1 - k.air / k.airTotal)) * 11 * scale
+      : 0;
     ctx.save();
     ctx.translate(x, y);
     if (k.spin > 0) ctx.rotate(Math.sin(k.spin * 18) * 0.7);
-    // 影（ソフト）
-    const shadow = ctx.createRadialGradient(0, h * 0.02, 0, 0, h * 0.02, w * 0.52);
-    shadow.addColorStop(0, 'rgba(0,0,0,0.34)');
-    shadow.addColorStop(0.7, 'rgba(0,0,0,0.15)');
+    // 影（ソフト。空中では小さく薄く）
+    const shScale = lift > 0 ? Math.max(0.55, 1 - lift / (22 * scale)) : 1;
+    const shadow = ctx.createRadialGradient(0, h * 0.02, 0, 0, h * 0.02, w * 0.52 * shScale);
+    shadow.addColorStop(0, `rgba(0,0,0,${0.34 * shScale})`);
+    shadow.addColorStop(0.7, `rgba(0,0,0,${0.15 * shScale})`);
     shadow.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = shadow;
     ctx.beginPath();
-    ctx.ellipse(0, h * 0.02, w * 0.52, h * 0.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, h * 0.02, w * 0.52 * shScale, h * 0.2 * shScale, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.translate(0, -lift);
     // ブースト炎
     if (k.boost > 0) {
       ctx.fillStyle = 'rgba(255,140,0,0.85)';
@@ -2112,9 +2392,12 @@
     }
   }
 
-  function renderFog() {
+  function renderFog(hor) {
+    ctx.save();
+    ctx.translate(0, hor - HORIZON);
     ctx.fillStyle = fogGrad;
     ctx.fillRect(0, HORIZON, W, 44);
+    ctx.restore();
   }
 
   function renderMinimap() {
@@ -2149,9 +2432,15 @@
     const camX = player.x - dirX * CAM_BACK;
     const camY = player.y - dirY * CAM_BACK;
 
-    renderSky(player.a);
-    renderGround(camX, camY, dirX, dirY);
-    renderFog();
+    // 坂: 勾配に応じて地平線をなめらかに上下（登りで上がる）
+    const targetHor = HORIZON - (hillSlope[player.wp] || 0) * 11;
+    horY += (targetHor - horY) * 0.08;
+    horY = Math.max(HOR_MIN + 2, Math.min(HORIZON + 30, horY));
+    const hor = Math.round(horY);
+
+    renderSky(player.a, hor);
+    renderGround(camX, camY, dirX, dirY, hor);
+    renderFog(hor);
     renderSprites(camX, camY, dirX, dirY);
     renderPlayer();
     renderAmbient();
@@ -2361,6 +2650,7 @@
       if (m.b) remoteKart.boost = 0.2;
       if (m.n) remoteKart.spin = 0.2;
       if (m.sh) remoteKart.shield = 0.3;
+      if (m.j) { remoteKart.air = 0.45; remoteKart.airTotal = 0.9; }
       if (m.lap > LAPS && !remoteKart.finished) {
         remoteKart.finished = true;
         finishOrder.push(remoteKart);
@@ -2435,6 +2725,7 @@
       b: player.boost > 0 ? 1 : 0,
       n: player.spin > 0 ? 1 : 0,
       sh: player.shield > 0 ? 1 : 0,
+      j: player.air > 0 ? 1 : 0,
     });
   }
 
@@ -2543,6 +2834,9 @@
     get state() { return state; },
     get shots() { return shots; },
     get fireworks() { return fireworks; },
+    get pads() { return pads; },
+    get horizon() { return horY; },
+    rank: () => rankOf(player).rank,
     give: (t) => { if (player) player.item = t; },
     texURL: () => texCanvas.toDataURL(),
     isDirt, isRoad,
