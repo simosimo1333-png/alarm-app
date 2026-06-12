@@ -346,6 +346,38 @@
       t.fill();
     }
 
+    // コース外のにぎやかし: 田畑と池（道路はこの上に描かれる）
+    for (let i = 0; i < 12; i++) {
+      const x = 120 + rnd() * (TEX - 240);
+      const y = 120 + rnd() * (TEX - 240);
+      if (i < 3) {
+        // 池
+        const r = 50 + rnd() * 55;
+        t.fillStyle = '#7ba7c9';
+        t.beginPath();
+        t.ellipse(x, y, r * 1.25, r * 0.85, rnd() * 3, 0, Math.PI * 2);
+        t.fill();
+        t.fillStyle = '#5b8fb9';
+        t.beginPath();
+        t.ellipse(x, y, r * 1.05, r * 0.68, 0, 0, Math.PI * 2);
+        t.fill();
+      } else {
+        // 段々の畑（縞模様）
+        const fw = 110 + rnd() * 140, fh = 80 + rnd() * 110;
+        const ang = rnd() * Math.PI;
+        t.save();
+        t.translate(x, y);
+        t.rotate(ang);
+        t.fillStyle = 'rgba(0,0,0,0.13)';
+        t.fillRect(-fw / 2 - 4, -fh / 2 - 4, fw + 8, fh + 8);
+        for (let s = 0; s < fh; s += 14) {
+          t.fillStyle = (s / 14) % 2 ? 'rgba(190,205,120,0.5)' : 'rgba(110,150,80,0.45)';
+          t.fillRect(-fw / 2, -fh / 2 + s, fw, 14);
+        }
+        t.restore();
+      }
+    }
+
     t.lineJoin = 'round';
     t.lineCap = 'round';
 
@@ -400,7 +432,7 @@
     t.lineCap = 'butt';
     for (const pad of pads) {
       traceSegment(t, pad.start, pad.len);
-      t.strokeStyle = pad.type === 'dash' ? '#ff8f00' : '#3949ab';
+      t.strokeStyle = pad.type === 'dash' ? '#ff8f00' : pad.type === 'glide' ? '#00acc1' : '#3949ab';
       t.lineWidth = ROADW - 10;
       t.stroke();
       if (pad.type === 'dash') {
@@ -1257,6 +1289,14 @@
       const side = (j / 4) % 2 ? 1 : -1;
       placeDeco(j, side * (ROADW / 2 + 32), 'nobori', 0.9 + rnd() * 0.2);
     }
+    // コースから離れた原野にも散布して、見渡したときの里山の風景をつくる
+    for (let i = 0; i < 90; i++) {
+      const x = 60 + rnd() * (TEX - 120);
+      const y = 60 + rnd() * (TEX - 120);
+      if (isRoad(x, y)) continue;
+      const type = table[(rnd() * table.length) | 0];
+      decorations.push({ x, y, type, size: 0.8 + rnd() * 0.55 });
+    }
   }
 
   function buildSky() {
@@ -1286,17 +1326,42 @@
   }
 
   // 坂のプロファイル（登り下りで地平線が上下する）
-  function buildHills() {
-    const a1 = 13 + rnd() * 9, p1 = rnd() * Math.PI * 2;
-    const a2 = 7 + rnd() * 6, p2 = rnd() * Math.PI * 2;
-    const hh = [];
-    for (let i = 0; i < N_WP; i++) {
-      hh.push(
-        a1 * Math.sin((i / N_WP) * Math.PI * 4 + p1) +
-        a2 * Math.sin((i / N_WP) * Math.PI * 10 + p2)
-      );
+  // 本物の3D地形: なだらかな丘のヘイトフィールド
+  let hills3d = [];
+  function buildTerrain() {
+    hills3d = [];
+    for (let i = 0; i < 9; i++) {
+      hills3d.push({
+        x: 160 + rnd() * (TEX - 320),
+        z: 160 + rnd() * (TEX - 320),
+        amp: (rnd() * 1.7 - 0.6) * 52,
+        r: 300 + rnd() * 380,
+      });
     }
-    hillSlope = hh.map((v, i) => hh[(i + 4) % N_WP] - hh[(i - 4 + N_WP) % N_WP]);
+  }
+
+  function heightAt(x, z) {
+    let h = 0;
+    for (const b of hills3d) {
+      const d2 = ((x - b.x) ** 2 + (z - b.z) ** 2) / (b.r * b.r);
+      if (d2 < 1) {
+        const t = 1 - d2;
+        h += b.amp * t * t;
+      }
+    }
+    // 周囲の平地となめらかにつながるよう、端では0へ
+    const m = 130;
+    const e = Math.min(x, TEX - x, z, TEX - z);
+    if (e < m) h *= Math.max(0, e / m);
+    return h;
+  }
+
+  function buildHills() {
+    // コース沿いの勾配（カメラのピッチ用）を地形からサンプリング
+    hillSlope = wps.map((w, i) => {
+      const a = wps[(i + 4) % N_WP], b = wps[(i - 4 + N_WP) % N_WP];
+      return (heightAt(a.x, a.y) - heightAt(b.x, b.y)) * 0.55;
+    });
     horY = HORIZON;
   }
 
@@ -1312,7 +1377,7 @@
     };
     const want = [
       { at: 0.16, type: 'dash' }, { at: 0.3, type: 'jump' }, { at: 0.48, type: 'dash' },
-      { at: 0.66, type: 'jump' }, { at: 0.84, type: 'dash' },
+      { at: 0.66, type: 'glide' }, { at: 0.84, type: 'dash' },
     ];
     for (const w of want) {
       const base = Math.round(w.at * N_WP);
@@ -1327,7 +1392,7 @@
       // アイテムボックスの列（wp 50,150,…）と重なったらずらす
       const m = found % 100;
       if (m >= 42 && m <= 60) found = (found + 16) % N_WP;
-      pads.push({ start: found, len: w.type === 'jump' ? 5 : 7, type: w.type });
+      pads.push({ start: found, len: w.type === 'dash' ? 7 : 5, type: w.type });
     }
   }
 
@@ -1340,6 +1405,7 @@
     courseSeed = seed !== undefined ? seed : ((Math.random() * 0xffffffff) >>> 0);
     srand(courseSeed);
     buildTrack(course.ctrl);
+    buildTerrain();
     buildHills();
     buildPads();
     buildTexture();
@@ -1353,11 +1419,15 @@
         grassB: theme.grassB,
         fog: theme.fog,
         light: theme.light || { dir: [-0.45, -0.8, 0.35], color: [1, 1, 0.96], amb: 0.6 },
+        heightAt,
       });
       glDecos = decorations.map((d) => {
         const spec = DECO[d.type];
         const w = spec.w * d.size;
-        return { x: d.x, z: d.y, canvas: spec.img, w, h: w * spec.img.height / spec.img.width };
+        return {
+          x: d.x, z: d.y, y0: heightAt(d.x, d.y),
+          canvas: spec.img, w, h: w * spec.img.height / spec.img.width,
+        };
       });
     }
   }
@@ -1678,8 +1748,9 @@
       aiItemT: 0,
       stuckT: 0,
       reverseT: 0,
-      air: 0,
-      airTotal: 0.85,
+      alt: 0,
+      vAlt: 0,
+      glide: false,
       padT: 0,
       finished: false,
     };
@@ -1725,7 +1796,8 @@
       const w = wps[i];
       const rx = -w.ty, ry = w.tx;
       for (const off of [-ROADW * 0.3, 0, ROADW * 0.3]) {
-        itemBoxes.push({ x: w.x + rx * off, y: w.y + ry * off, respawn: 0 });
+        const bx = w.x + rx * off, by = w.y + ry * off;
+        itemBoxes.push({ x: bx, y: by, y0: heightAt(bx, by), respawn: 0 });
       }
     }
   }
@@ -1851,9 +1923,16 @@
     k.wallT = Math.max(0, (k.wallT || 0) - dt);
     k.shield = Math.max(0, (k.shield || 0) - dt);
     k.padT = Math.max(0, (k.padT || 0) - dt);
-    if (k.air > 0) {
-      k.air -= dt;
-      if (k.air <= 0 && k.isPlayer) { buzz(25); beep(220, 0.08, 0.1, 'triangle'); } // 着地
+    if (k.alt > 0 || k.vAlt > 0) {
+      // ジャンプ/滑空の上下運動（グライド中は重力が弱く長く飛べる）
+      k.alt += k.vAlt * dt;
+      k.vAlt -= (k.glide ? 190 : 620) * dt;
+      if (k.alt <= 0) {
+        k.alt = 0;
+        k.vAlt = 0;
+        k.glide = false;
+        if (k.isPlayer) { buzz(25); beep(220, 0.08, 0.1, 'triangle'); } // 着地
+      }
     }
     if (k.spin > 0) {
       k.spin -= dt;
@@ -1902,7 +1981,7 @@
       }
     }
 
-    const airborne = k.air > 0;
+    const airborne = k.alt > 0;
     const onRoad = isRoad(k.x, k.y);
     const onDirt = !airborne && onRoad && isDirt(k.x, k.y);
     let limit = MAX_SPEED * k.skill * (onRoad ? 1 : OFFROAD_MUL);
@@ -1957,10 +2036,18 @@
             buzz(20);
           }
         } else if (Math.abs(k.speed) > 60) {
-          k.air = 0.85;
-          k.airTotal = 0.85;
-          k.speed = Math.max(k.speed, MAX_SPEED * 0.85); // 踏み切りの勢い
-          if (k.isPlayer) { beep(620, 0.22, 0.12, 'triangle'); buzz(30); }
+          if (pad.type === 'glide') {
+            // グライド台: 高く打ち上げて長い空中走行
+            k.vAlt = 165;
+            k.glide = true;
+            k.speed = Math.max(k.speed, MAX_SPEED * 0.95);
+            if (k.isPlayer) { beep(740, 0.3, 0.12, 'sine'); buzz([30, 40, 30]); }
+          } else {
+            // ジャンプ台: 速いほど高く飛ぶ
+            k.vAlt = 140 + Math.max(k.speed, 0) * 0.28;
+            k.speed = Math.max(k.speed, MAX_SPEED * 0.85); // 踏み切りの勢い
+            if (k.isPlayer) { beep(620, 0.22, 0.12, 'triangle'); buzz(30); }
+          }
         }
         break;
       }
@@ -2119,7 +2206,7 @@
       bn.arm -= dt;
       if (bn.arm > 0) continue;
       for (const k of karts) {
-        if (k.remote || k.spin > 0 || k.air > 0) continue; // ジャンプ中は飛び越えられる
+        if (k.remote || k.spin > 0 || k.alt > 0) continue; // ジャンプ中は飛び越えられる
         if (Math.hypot(k.x - bn.x, k.y - bn.y) < 20) {
           if (!crashKart(k, 'banana', 1, 0.25) && k.isPlayer) {
             beep(700, 0.1, 0.1, 'sine'); // シールドで防いだ
@@ -2139,7 +2226,7 @@
       s.y += s.vy * dt;
       if (s.life <= 0 || !isRoad(s.x, s.y)) { shots.splice(i, 1); continue; }
       for (const k of karts) {
-        if (k.remote || k === s.owner || k.spin > 0 || k.air > 0) continue;
+        if (k.remote || k === s.owner || k.spin > 0 || k.alt > 0) continue;
         if (Math.hypot(k.x - s.x, k.y - s.y) < 24) {
           if (!crashKart(k, 'snowball', 1, 0.25) && k.isPlayer) {
             beep(700, 0.1, 0.1, 'sine'); // シールドで防いだ
@@ -2164,10 +2251,13 @@
       k.a += da * f;
       k.speed = remoteTarget.sp;
     }
+    if (remoteTarget && remoteTarget.al !== undefined) {
+      k.alt += (remoteTarget.al - k.alt) * Math.min(1, dt * 10);
+      if (k.alt < 0.5 && remoteTarget.al === 0) k.alt = 0;
+    }
     k.boost = Math.max(0, k.boost - dt);
     k.spin = Math.max(0, k.spin - dt);
     k.shield = Math.max(0, k.shield - dt);
-    k.air = Math.max(0, k.air - dt);
   }
 
   // ===== レンダリング =====
@@ -2472,9 +2562,7 @@
     const w = 34 * scale;
     const h = w * (40 / 48);
     // ジャンプ中は放物線で浮く（影は地面に残る）
-    const lift = k.air > 0 && k.airTotal
-      ? Math.sin(Math.PI * (1 - k.air / k.airTotal)) * 11 * scale
-      : 0;
+    const lift = k.alt > 0 ? k.alt * 0.42 * scale : 0;
     ctx.save();
     ctx.translate(x, y);
     if (k.spin > 0) ctx.rotate(Math.sin(k.spin * 18) * 0.7);
@@ -2640,9 +2728,8 @@
       time: performance.now() / 1000,
       karts: karts.map((k) => ({
         x: k.x, z: k.y, a: k.a,
-        lift: k.air > 0 && k.airTotal
-          ? Math.sin(Math.PI * (1 - k.air / k.airTotal)) * 26
-          : 0,
+        lift: k.alt,
+        glide: k.glide && k.alt > 0,
         roll: k.isPlayer ? steerSmooth * 0.13 : 0,
         body: k.bodyC, helmet: k.helmetC,
         boost: k.boost, shield: k.shield,
@@ -2650,7 +2737,7 @@
         icon: k.spin > 0 && k.crashIcon && CRASH_FX[k.crashIcon]
           ? CRASH_FX[k.crashIcon].icon : null,
       })),
-      boxes: itemBoxes.filter((b) => b.respawn <= 0).map((b) => ({ x: b.x, z: b.y })),
+      boxes: itemBoxes.filter((b) => b.respawn <= 0).map((b) => ({ x: b.x, z: b.y, y0: b.y0 })),
       bananas: bananas.map((b) => ({ x: b.x, z: b.y })),
       shots: shots.map((s) => ({ x: s.x, z: s.y })),
       decos: glDecos,
@@ -2890,7 +2977,7 @@
       if (m.b) remoteKart.boost = 0.2;
       if (m.n) remoteKart.spin = 0.2;
       if (m.sh) remoteKart.shield = 0.3;
-      if (m.j) { remoteKart.air = 0.45; remoteKart.airTotal = 0.9; }
+      remoteKart.glide = !!m.g;
       if (m.lap > LAPS && !remoteKart.finished) {
         remoteKart.finished = true;
         finishOrder.push(remoteKart);
@@ -2965,7 +3052,8 @@
       b: player.boost > 0 ? 1 : 0,
       n: player.spin > 0 ? 1 : 0,
       sh: player.shield > 0 ? 1 : 0,
-      j: player.air > 0 ? 1 : 0,
+      al: Math.round(player.alt),
+      g: player.glide && player.alt > 0 ? 1 : 0,
     });
   }
 
