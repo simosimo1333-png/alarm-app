@@ -46,7 +46,9 @@ h1 {
   touch-action: none;
 }
 
-#game {
+#game,
+#game3d,
+#sky {
   position: absolute;
   inset: 0;
   width: 100%;
