@@ -530,8 +530,11 @@ void main() {
         // 半透明（奥から手前へ）
         const trans = [];
         const dist2 = (x, z) => (x - camPos[0]) ** 2 + (z - camPos[2]) ** 2;
+        const FOG_FAR2 = FOG_RANGE[1] * FOG_RANGE[1];
         for (const d of f.decos) {
-          trans.push({ d: dist2(d.x, d.z), fn: () => {
+          const dd = dist2(d.x, d.z);
+          if (dd > FOG_FAR2) continue; // フォグで見えない距離は描かない
+          trans.push({ d: dd, fn: () => {
             draw(MESH.bill, billboard(d.x, 0, d.z, d.w, d.h), [1, 1, 1], { tex: canvasTex(d.canvas), lit: 0 });
           } });
         }
