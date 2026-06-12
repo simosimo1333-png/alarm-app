@@ -207,6 +207,32 @@ void main() {
     };
   }
 
+  function buildTerrainGrid(size, segs, hAt) {
+    // 起伏のあるヘイトフィールド地形（法線つきでライティングが乗る）
+    const verts = [], idx = [];
+    const e = size / segs;
+    for (let j = 0; j <= segs; j++) {
+      for (let i = 0; i <= segs; i++) {
+        const x = (i / segs) * size;
+        const z = (j / segs) * size;
+        const y = hAt(x, z);
+        const nx = hAt(x - e, z) - hAt(x + e, z);
+        const nz = hAt(x, z - e) - hAt(x, z + e);
+        const ny = 2 * e;
+        const l = Math.hypot(nx, ny, nz) || 1;
+        verts.push(x, y, z, nx / l, ny / l, nz / l, i / segs, j / segs);
+      }
+    }
+    for (let j = 0; j < segs; j++) {
+      for (let i = 0; i < segs; i++) {
+        const a = j * (segs + 1) + i;
+        const b = a + segs + 1;
+        idx.push(a, b, a + 1, b, b + 1, a + 1);
+      }
+    }
+    return { verts, idx };
+  }
+
   function buildGroundQuad(size, uvRep) {
     // XZ平面 (0..size)、上向き
     return {
@@ -314,6 +340,8 @@ void main() {
       const stageCtx = stage.getContext('2d');
       let trackTex = gl.createTexture();
       let grassTex = gl.createTexture();
+      let hAt = () => 0;            // 地形の高さ
+      let terrainMesh = null;       // 起伏つき地面
       let light = { dir: [-0.45, -0.8, 0.35], color: [1, 1, 0.96], amb: 0.6 };
       let fogCol = [0.8, 0.9, 0.95];
       const FOG_RANGE = [650, 2100];
@@ -330,6 +358,13 @@ void main() {
       }
 
       function setCourse(c) {
+        // 地形（起伏メッシュ）を作り直す
+        hAt = c.heightAt || (() => 0);
+        if (terrainMesh) {
+          gl.deleteBuffer(terrainMesh.vbo);
+          gl.deleteBuffer(terrainMesh.ibo);
+        }
+        terrainMesh = makeMesh(buildTerrainGrid(TEX, 88, hAt));
         // 路面
         const norm = Math.sqrt(c.light.dir[0] ** 2 + c.light.dir[1] ** 2 + c.light.dir[2] ** 2);
         light = {
@@ -365,6 +400,30 @@ void main() {
       }
       const shadowCv = radialSprite(4, 30, [[0, 'rgba(0,0,0,0.42)'], [0.7, 'rgba(0,0,0,0.2)'], [1, 'rgba(0,0,0,0)']]);
       const flameCv = radialSprite(2, 30, [[0, 'rgba(255,240,160,0.95)'], [0.4, 'rgba(255,150,30,0.85)'], [1, 'rgba(255,80,0,0)']]);
+      const canopyCv = (() => {
+        // パラグライダーの傘（虹色のアーチ）
+        const cv = document.createElement('canvas');
+        cv.width = 96;
+        cv.height = 40;
+        const c2 = cv.getContext('2d');
+        const cols = ['#ef5350', '#ffa726', '#ffee58', '#66bb6a', '#42a5f5'];
+        for (let i = 0; i < 5; i++) {
+          c2.fillStyle = cols[i];
+          c2.beginPath();
+          c2.moveTo(48, 36);
+          c2.arc(48, 38, 44, Math.PI + (i / 5) * Math.PI, Math.PI + ((i + 1) / 5) * Math.PI);
+          c2.closePath();
+          c2.fill();
+        }
+        c2.strokeStyle = 'rgba(60,60,70,0.8)';
+        c2.lineWidth = 1.5;
+        c2.beginPath();
+        c2.moveTo(10, 16); c2.lineTo(48, 40);
+        c2.moveTo(86, 16); c2.lineTo(48, 40);
+        c2.stroke();
+        return cv;
+      })();
+
       const ringCv = (() => {
         const cv = document.createElement('canvas');
         cv.width = cv.height = 64;
@@ -486,7 +545,8 @@ void main() {
 
         // カメラ: プレイヤーの後ろ上方。坂で地平線が合うようにピッチを調整
         const dx = Math.cos(f.heading), dz = Math.sin(f.heading);
-        const eye = [f.x - dx * 118, 58, f.z - dz * 118];
+        const ex = f.x - dx * 118, ez = f.z - dz * 118;
+        const eye = [ex, Math.max(hAt(ex, ez), hAt(f.x, f.z)) + 58, ez];
         const basePitch = Math.atan((0.5 - HOR_FRAC) * 2 * Math.tan(FOVY / 2));
         const pitch = basePitch + (f.horShift / H) * FOVY;
         const cp = Math.cos(pitch), sp = Math.sin(pitch);
@@ -497,8 +557,9 @@ void main() {
 
         // 地面
         gl.disable(gl.BLEND);
+        // 地形を先に描き、周囲の草地は深度テストで隠れた分の塗りを省く
+        draw(terrainMesh || MESH.ground, scaleAt(1, 1, 1, 0, 0, 0), [1, 1, 1], { tex: trackTex });
         draw(MESH.surround, scaleAt(1, 1, 1, -20000 + TEX / 2, -0.6, -20000 + TEX / 2), [1, 1, 1], { tex: grassTex });
-        draw(MESH.ground, scaleAt(1, 1, 1, 0, 0, 0), [1, 1, 1], { tex: trackTex });
         gl.enable(gl.BLEND);
 
         // 影（地面の上、デプス書き込みなし）
@@ -508,11 +569,11 @@ void main() {
             s, 0, 0, 0,
             0, 0, s, 0,
             0, 1, 0, 0,
-            x, 0.5, z - s / 2, 1,
+            x, hAt(x, z) + 1.2, z - s / 2, 1,
           ]), [1, 1, 1], { tex: canvasTex(shadowCv), lit: 0, alpha });
         };
         for (const k of f.karts) {
-          const s = Math.max(0.55, 1 - k.lift / 70);
+          const s = Math.max(0.55, 1 - k.lift / 90);
           flatQuad(k.x, k.z, 38 * s, s);
         }
         for (const b of f.bananas) flatQuad(b.x, b.z, 20, 0.7);
@@ -521,7 +582,7 @@ void main() {
         // カート（不透明）
         for (const k of f.karts) {
           const model = kartModel(k.body, k.helmet);
-          const base = [k.x, k.lift, k.z];
+          const base = [k.x, hAt(k.x, k.z) + k.lift, k.z];
           for (const part of model) {
             draw(part[0], partMatrix(k.a, k.roll || 0, base, part), part[7]);
           }
@@ -535,7 +596,7 @@ void main() {
           const dd = dist2(d.x, d.z);
           if (dd > FOG_FAR2) continue; // フォグで見えない距離は描かない
           trans.push({ d: dd, fn: () => {
-            draw(MESH.bill, billboard(d.x, 0, d.z, d.w, d.h), [1, 1, 1], { tex: canvasTex(d.canvas), lit: 0 });
+            draw(MESH.bill, billboard(d.x, d.y0 || 0, d.z, d.w, d.h), [1, 1, 1], { tex: canvasTex(d.canvas), lit: 0 });
           } });
         }
         const t = f.time;
@@ -555,44 +616,51 @@ void main() {
               s * ca, 0, s * -sa, 0,
               0, s, 0, 0,
               s * sa, 0, s * ca, 0,
-              b.x, 15 + bob, b.z, 1,
+              b.x, (b.y0 || 0) + 15 + bob, b.z, 1,
             ]), rgb, { tex: canvasTex(f.sprites.star), alpha, lit: 0 });
           } });
         }
         for (const bn of f.bananas) {
           trans.push({ d: dist2(bn.x, bn.z), fn: () => {
-            draw(MESH.bill, billboard(bn.x, 0.5, bn.z, 17, 17), [1, 1, 1], { tex: canvasTex(f.sprites.banana), lit: 0 });
+            draw(MESH.bill, billboard(bn.x, hAt(bn.x, bn.z) + 0.5, bn.z, 17, 17), [1, 1, 1], { tex: canvasTex(f.sprites.banana), lit: 0 });
           } });
         }
         for (const s of f.shots) {
           trans.push({ d: dist2(s.x, s.z), fn: () => {
-            draw(MESH.bill, billboard(s.x, 4, s.z, 15, 15), [1, 1, 1], { tex: canvasTex(f.sprites.snowball), lit: 0 });
+            draw(MESH.bill, billboard(s.x, hAt(s.x, s.z) + 4, s.z, 15, 15), [1, 1, 1], { tex: canvasTex(f.sprites.snowball), lit: 0 });
           } });
         }
         for (const k of f.karts) {
+          const ky = hAt(k.x, k.z) + k.lift;
           if (k.boost > 0) {
             const bx = k.x - Math.cos(k.a) * 24, bz = k.z - Math.sin(k.a) * 24;
             trans.push({ d: dist2(bx, bz), fn: () => {
               const fs = 14 + Math.random() * 6;
-              draw(MESH.bill, billboard(bx, k.lift + 2, bz, fs, fs), [1, 1, 1], { tex: canvasTex(flameCv), lit: 0, alpha: 0.9 });
+              draw(MESH.bill, billboard(bx, ky + 2, bz, fs, fs), [1, 1, 1], { tex: canvasTex(flameCv), lit: 0, alpha: 0.9 });
+            } });
+          }
+          if (k.glide) {
+            // 滑空中はパラグライダーの傘を頭上に
+            trans.push({ d: dist2(k.x, k.z), fn: () => {
+              draw(MESH.bill, billboard(k.x, ky + 26, k.z, 52, 20), [1, 1, 1], { tex: canvasTex(canopyCv), lit: 0 });
             } });
           }
           if (k.shield > 0) {
             const a = k.shield < 1.5 ? 0.4 + 0.3 * Math.sin(t * 14) : 0.75;
             trans.push({ d: dist2(k.x, k.z), fn: () => {
-              draw(MESH.bill, billboard(k.x, k.lift - 2, k.z, 52, 52), [1, 1, 1], { tex: canvasTex(ringCv), lit: 0, alpha: Math.max(0.15, a) });
+              draw(MESH.bill, billboard(k.x, ky - 2, k.z, 52, 52), [1, 1, 1], { tex: canvasTex(ringCv), lit: 0, alpha: Math.max(0.15, a) });
             } });
           }
           if (k.label) {
             trans.push({ d: dist2(k.x, k.z), fn: () => {
               const lw = 13 * (k.label.width / k.label.height);
-              draw(MESH.bill, billboard(k.x, k.lift + 28, k.z, lw, 13), [1, 1, 1], { tex: canvasTex(k.label), lit: 0 });
+              draw(MESH.bill, billboard(k.x, ky + 28, k.z, lw, 13), [1, 1, 1], { tex: canvasTex(k.label), lit: 0 });
             } });
           }
           if (k.icon) {
             trans.push({ d: dist2(k.x, k.z), fn: () => {
               const bob = Math.sin(t * 11) * 2;
-              draw(MESH.bill, billboard(k.x, k.lift + 40 + bob, k.z, 16, 16), [1, 1, 1], { tex: canvasTex(k.icon), lit: 0 });
+              draw(MESH.bill, billboard(k.x, ky + 40 + bob, k.z, 16, 16), [1, 1, 1], { tex: canvasTex(k.icon), lit: 0 });
             } });
           }
         }
