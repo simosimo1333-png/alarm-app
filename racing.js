@@ -1063,7 +1063,11 @@
   let itemBoxes = [];
   let bananas = [];
   let shots = [];        // 雪玉（飛び道具）
-  let flashT = 0;        // かみなりを受けたときの画面フラッシュ
+  let flashT = 0;        // クラッシュ時の画面フラッシュ
+  let flashColor = '255,255,180';
+  let crashFxT = 0;      // 「なにに当たったか」表示の残り時間
+  let crashFxCause = null;
+  let lastZapT = -99;    // かみなりの連発防止
   let state = 'title';   // title | count | race | finished
   let countT = 0;
   let raceTime = 0;
@@ -1077,22 +1081,40 @@
     shield: '🛡️',
   };
 
+  // クラッシュ演出（原因アイテムごとのアイコン・フラッシュ色・効果音）
+  const zapSprite = makeEmojiSprite('⚡');
+  const CRASH_FX = {
+    banana:   { icon: bananaSprite,   flash: '255,200,90',  freq: 180 },
+    snowball: { icon: snowballSprite, flash: '190,230,255', freq: 240 },
+    zap:      { icon: zapSprite,      flash: '255,255,140', freq: 90 },
+  };
+  const crashLabels = {
+    banana: makeLabelSprite('🍌 バナナ！'),
+    snowball: makeLabelSprite('❄️ ゆきだま！'),
+    zap: makeLabelSprite('⚡ かみなり！'),
+  };
+
   // 順位が後ろのカートほど強いアイテムが出やすい
   function rollItem(k) {
     const behind = rankOf(k).rank > karts.length / 2;
     const x = Math.random();
+    let item;
     if (behind) {
-      if (x < 0.32) return 'boost';
-      if (x < 0.52) return 'snowball';
-      if (x < 0.64) return 'banana';
-      if (x < 0.82) return 'zap';
-      return 'shield';
+      if (x < 0.34) item = 'boost';
+      else if (x < 0.56) item = 'snowball';
+      else if (x < 0.70) item = 'banana';
+      else if (x < 0.90) item = 'shield';
+      else item = 'zap';            // 10%
+    } else {
+      if (x < 0.24) item = 'boost';
+      else if (x < 0.52) item = 'snowball';
+      else if (x < 0.80) item = 'banana';
+      else if (x < 0.97) item = 'shield';
+      else item = 'zap';            // 3%
     }
-    if (x < 0.22) return 'boost';
-    if (x < 0.5) return 'snowball';
-    if (x < 0.76) return 'banana';
-    if (x < 0.92) return 'shield';
-    return 'zap';
+    // かみなりは直近15秒以内に使われていたら出さない（連発防止）
+    if (item === 'zap' && raceTime - lastZapT < 15) item = 'snowball';
+    return item;
   }
 
   // プレイヤー名（入力欄 + localStorage）
@@ -1164,6 +1186,8 @@
     raceTime = 0;
     steerSmooth = 0;
     flashT = 0;
+    crashFxT = 0;
+    lastZapT = -99;
     remoteTarget = null;
     remoteFinish = null;
 
@@ -1288,7 +1312,15 @@
     k.shield = Math.max(0, (k.shield || 0) - dt);
     if (k.spin > 0) {
       k.spin -= dt;
-      k.a += dt * 10;
+      if (k.spin <= 0) {
+        k.spin = 0;
+        if (k.spinTotal) k.a = k.spinA; // クラッシュ前の向きに戻す
+      } else if (k.spinTotal) {
+        // 経過に応じてちょうど2回転 → 終わると自然に元の向きへ
+        k.a = k.spinA + (1 - k.spin / k.spinTotal) * Math.PI * 4;
+      } else {
+        k.a += dt * 10;
+      }
       k.speed *= Math.max(0, 1 - 2.5 * dt);
       hitWall(k, moveWithWalls(k, Math.cos(k.a) * k.speed * dt * 0.3, Math.sin(k.a) * k.speed * dt * 0.3), dt);
       updateNearestWp(k);
@@ -1355,16 +1387,30 @@
     }
   }
 
+  // クラッシュ共通処理。向きを保存し、スピン後に元へ戻す。
+  // シールド中・スピン中・ゴール後は無効（falseを返す）
+  function crashKart(k, cause, dur, speedMul) {
+    if (k.shield > 0 || k.spin > 0 || k.finished) return false;
+    k.spin = dur;
+    k.spinTotal = dur;
+    k.spinA = k.a;       // クラッシュ前の向き（スピン後に復元）
+    k.speed *= speedMul;
+    k.crashIcon = cause; // 頭上に原因アイテムを表示
+    if (k.isPlayer) {
+      const fx = CRASH_FX[cause];
+      flashT = 0.3;
+      flashColor = fx.flash;
+      crashFxT = 1.3;
+      crashFxCause = cause;
+      beep(fx.freq, 0.4, 0.16, 'sawtooth');
+      buzz(cause === 'zap' ? [80, 60, 80] : [60, 50, 60]);
+    }
+    return true;
+  }
+
   // かみなりを受けたときの処理（シールドで防げる）
   function zapKart(o) {
-    if (o.shield > 0 || o.finished) return;
-    o.spin = Math.max(o.spin, 0.8);
-    o.speed *= 0.4;
-    if (o.isPlayer) {
-      flashT = 0.3;
-      beep(90, 0.45, 0.18, 'sawtooth');
-      buzz([80, 60, 80]);
-    }
+    crashKart(o, 'zap', 0.8, 0.4);
   }
 
   function useItem(k) {
@@ -1410,7 +1456,11 @@
       if (k.isPlayer) beep(740, 0.2, 0.1, 'sine');
     } else if (item === 'zap') {
       // 自分以外の全カートを感電させる
-      if (k.isPlayer && vsMode) netSend({ t: 'zap' });
+      lastZapT = raceTime;
+      if (k.isPlayer && vsMode) {
+        netSend({ t: 'zap' });
+        if (remoteKart) remoteKart.crashIcon = 'zap';
+      }
       for (const o of karts) {
         if (o === k || o.remote) continue; // 相手側は相手の画面で判定
         zapKart(o);
@@ -1472,12 +1522,8 @@
       for (const k of karts) {
         if (k.remote || k.spin > 0) continue;
         if (Math.hypot(k.x - bn.x, k.y - bn.y) < 20) {
-          if (k.shield > 0) {
-            if (k.isPlayer) beep(700, 0.1, 0.1, 'sine'); // シールドで防いだ
-          } else {
-            k.spin = 1;
-            k.speed *= 0.25;
-            if (k.isPlayer) { beep(180, 0.4, 0.15, 'sawtooth'); buzz([60, 50, 60]); }
+          if (!crashKart(k, 'banana', 1, 0.25) && k.isPlayer) {
+            beep(700, 0.1, 0.1, 'sine'); // シールドで防いだ
           }
           if (bn.id) netSend({ t: 'bhit', id: bn.id });
           bananas.splice(i, 1);
@@ -1496,12 +1542,8 @@
       for (const k of karts) {
         if (k.remote || k === s.owner || k.spin > 0) continue;
         if (Math.hypot(k.x - s.x, k.y - s.y) < 24) {
-          if (k.shield > 0) {
-            if (k.isPlayer) beep(700, 0.1, 0.1, 'sine');
-          } else {
-            k.spin = 1;
-            k.speed *= 0.25;
-            if (k.isPlayer) { beep(180, 0.4, 0.15, 'sawtooth'); buzz([60, 50, 60]); }
+          if (!crashKart(k, 'snowball', 1, 0.25) && k.isPlayer) {
+            beep(700, 0.1, 0.1, 'sine'); // シールドで防いだ
           }
           if (s.id) netSend({ t: 'shotHit', id: s.id });
           shots.splice(i, 1);
@@ -1766,6 +1808,15 @@
       const lh = lw * k.label.height / k.label.width;
       ctx.drawImage(k.label, x - lw / 2, y - h - lh - 3 * scale, lw, lh);
     }
+    // クラッシュの原因アイテムを頭上に表示
+    if (k.spin > 0 && k.crashIcon && CRASH_FX[k.crashIcon]) {
+      const img = CRASH_FX[k.crashIcon].icon;
+      const s = Math.min(60, 30 * scale);
+      const bob = Math.sin(performance.now() / 90) * s * 0.1;
+      ctx.globalAlpha = Math.min(1, k.spin * 2.5);
+      ctx.drawImage(img, x - s / 2, y - h - s - 18 * Math.min(2.4, scale) + bob, s, s);
+      ctx.globalAlpha = 1;
+    }
   }
 
   function renderPlayer() {
@@ -1803,6 +1854,16 @@
         );
         ctx.fill();
       }
+    }
+    // クラッシュ原因のテキスト（ふわっと上がって消える）
+    if (crashFxT > 0 && crashLabels[crashFxCause]) {
+      const img = crashLabels[crashFxCause];
+      const t = 1.3 - crashFxT;
+      const lh = 42;
+      const lw = lh * img.width / img.height;
+      ctx.globalAlpha = Math.min(1, crashFxT * 1.8);
+      ctx.drawImage(img, W / 2 - lw / 2, pr.y - 250 - t * 55, lw, lh);
+      ctx.globalAlpha = 1;
     }
     // 最高速付近のスピード線
     if (Math.abs(player.speed) > MAX_SPEED * 0.9) {
@@ -1864,9 +1925,9 @@
     renderSprites(camX, camY, dirX, dirY);
     renderPlayer();
     ctx.drawImage(vignette, 0, 0);
-    // かみなりを受けたときのフラッシュ
+    // クラッシュ時のフラッシュ（原因アイテムごとの色）
     if (flashT > 0) {
-      ctx.fillStyle = `rgba(255,255,180,${Math.min(0.65, flashT * 2.2)})`;
+      ctx.fillStyle = `rgba(${flashColor},${Math.min(0.6, flashT * 2)})`;
       ctx.fillRect(0, 0, W, H);
     }
     renderMinimap();
@@ -2078,11 +2139,13 @@
     } else if (m.t === 'bhit') {
       const i = bananas.findIndex((b) => b.id === m.id);
       if (i >= 0) bananas.splice(i, 1);
+      if (remoteKart) remoteKart.crashIcon = 'banana'; // 相手が踏んだ
     } else if (m.t === 'shot') {
       shots.push({ x: m.x, y: m.y, vx: m.vx, vy: m.vy, life: 2.5, owner: remoteKart, id: m.id });
     } else if (m.t === 'shotHit') {
       const i = shots.findIndex((s) => s.id === m.id);
       if (i >= 0) shots.splice(i, 1);
+      if (remoteKart) remoteKart.crashIcon = 'snowball'; // 相手に命中
     } else if (m.t === 'zap') {
       zapKart(player);
     } else if (m.t === 'box') {
@@ -2201,6 +2264,7 @@
     }
 
     flashT = Math.max(0, flashT - dt);
+    crashFxT = Math.max(0, crashFxT - dt);
     if (state !== 'title') {
       render();
       updateHud();
