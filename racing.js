@@ -24,6 +24,18 @@
   // ===== DOM =====
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
+  const sctx = document.getElementById('sky').getContext('2d'); // 空（背面レイヤー）
+  // 3Dレンダラー（WebGL）。?2d=1 か非対応環境ではモード7にフォールバック
+  let GL3D = null;
+  if (!new URLSearchParams(location.search).has('2d') && window.KartGL) {
+    try {
+      GL3D = window.KartGL.create(document.getElementById('game3d'), {
+        worldSize: TEX,
+        horizonFrac: HORIZON / H,
+      });
+    } catch (e) { GL3D = null; }
+  }
+  if (!GL3D) document.getElementById('game3d').style.display = 'none';
   const mmCanvas = document.getElementById('minimap');
   const mmCtx = mmCanvas.getContext('2d');
   const hud = document.getElementById('hud');
@@ -88,6 +100,7 @@
         ],
         deco: [['machiya', 3], ['sakagura', 2], ['yatai', 1], ['lantern', 1], ['nakabashi', 1], ['sarubobo', 2], ['dango', 1], ['torii', 1]],
         ambient: 'sakura', skyFx: 'fireworks',
+        light: { dir: [-0.75, -0.5, 0.2], color: [1, 0.8, 0.63], amb: 0.55 },
       },
     },
     {
@@ -112,6 +125,7 @@
         ],
         deco: [['gassho', 3], ['snowtree', 3], ['snowman', 1]],
         ambient: 'snow', skyFx: 'village',
+        light: { dir: [-0.4, -0.85, 0.3], color: [0.93, 0.97, 1], amb: 0.74 },
       },
     },
     {
@@ -160,6 +174,7 @@
         ],
         deco: [['autumn', 3], ['tree', 2], ['onsen', 1]],
         ambient: 'leaves',
+        light: { dir: [-0.55, -0.7, 0.3], color: [1, 0.92, 0.8], amb: 0.6 },
       },
     },
   ];
@@ -1190,6 +1205,20 @@
     buildDecorations();
     buildSky();
     buildAmbient();
+    if (GL3D) {
+      GL3D.setCourse({
+        trackCanvas: texCanvas,
+        grassA: theme.grassA,
+        grassB: theme.grassB,
+        fog: theme.fog,
+        light: theme.light || { dir: [-0.45, -0.8, 0.35], color: [1, 1, 0.96], amb: 0.6 },
+      });
+      glDecos = decorations.map((d) => {
+        const spec = DECO[d.type];
+        const w = spec.w * d.size;
+        return { x: d.x, z: d.y, canvas: spec.img, w, h: w * spec.img.height / spec.img.width };
+      });
+    }
   }
 
   // ===== カートスプライト（後ろ姿・高精細） =====
@@ -1492,6 +1521,8 @@
       sprite: makeKartSprite(def.body, def.helmet),
       label: makeLabelSprite(def.name),
       color: def.body,
+      bodyC: def.body,
+      helmetC: def.helmet || '#ffffff',
       skill: def.skill || 1,
       x: w.x + rx * lateral,
       y: w.y + ry * lateral,
@@ -2023,17 +2054,17 @@
 
   function renderSky(heading, hor) {
     // 坂による地平線の上下は、空全体を平行移動して表現する
-    ctx.save();
-    ctx.translate(0, hor - HORIZON);
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(0, -40, W, HORIZON + 40);
+    sctx.save();
+    sctx.translate(0, hor - HORIZON);
+    sctx.fillStyle = skyGrad;
+    sctx.fillRect(0, -40, W, HORIZON + 40);
 
     // 太陽の光（山の向こうに見える）
     {
       const sunSpan = W * 4;
       let sx = (W * 2.7 - (heading / (Math.PI * 2)) * sunSpan) % sunSpan;
       if (sx < 0) sx += sunSpan;
-      ctx.drawImage(glowSprite, sx - 110, HORIZON - 190, 220, 220);
+      sctx.drawImage(glowSprite, sx - 110, HORIZON - 190, 220, 220);
     }
 
     // 山並み（パララックスつき）
@@ -2042,23 +2073,23 @@
     for (const r of ridges) {
       let offset = (heading * r.speed) % span;
       if (offset < 0) offset += span;
-      ctx.fillStyle = r.color;
-      ctx.beginPath();
-      ctx.moveTo(0, HORIZON);
+      sctx.fillStyle = r.color;
+      sctx.beginPath();
+      sctx.moveTo(0, HORIZON);
       for (let x = 0; x <= W; x += 8) {
         const pan = (x + offset) % span;
         const i = (pan / segW) | 0;
         const f = (pan % segW) / segW;
         const hA = r.peaks[i % 24], hB = r.peaks[(i + 1) % 24];
         const hv = hA + (hB - hA) * f;
-        ctx.lineTo(x, HORIZON - r.amp * ak * hv);
+        sctx.lineTo(x, HORIZON - r.amp * ak * hv);
       }
-      ctx.lineTo(W, HORIZON);
-      ctx.closePath();
-      ctx.fill();
+      sctx.lineTo(W, HORIZON);
+      sctx.closePath();
+      sctx.fill();
       // 雪をかぶった頂
       if (r.snow) {
-        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        sctx.fillStyle = 'rgba(255,255,255,0.9)';
         for (let i = 0; i < 24; i++) {
           let px = i * segW - offset;
           while (px < -segW) px += span;
@@ -2066,12 +2097,12 @@
           if (px < -20 || px > W + 20) continue;
           const py = HORIZON - r.amp * ak * r.peaks[i];
           const cap = r.amp * ak * r.peaks[i] * 0.32;
-          ctx.beginPath();
-          ctx.moveTo(px, py);
-          ctx.lineTo(px - cap * 0.8, py + cap);
-          ctx.lineTo(px + cap * 0.8, py + cap);
-          ctx.closePath();
-          ctx.fill();
+          sctx.beginPath();
+          sctx.moveTo(px, py);
+          sctx.lineTo(px - cap * 0.8, py + cap);
+          sctx.lineTo(px + cap * 0.8, py + cap);
+          sctx.closePath();
+          sctx.fill();
         }
       }
     }
@@ -2090,48 +2121,48 @@
       for (const [base, s] of [[300, 13], [430, 10], [560, 16], [1500, 12], [1650, 14], [2400, 11]]) {
         const x = pan(base, 34) - 40;
         if (x < -40 || x > W + 40) continue;
-        ctx.fillStyle = '#9db4c2';
-        ctx.beginPath();
-        ctx.moveTo(x, HORIZON - s);
-        ctx.lineTo(x - s * 0.85, HORIZON);
-        ctx.lineTo(x + s * 0.85, HORIZON);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.beginPath();
-        ctx.moveTo(x, HORIZON - s);
-        ctx.lineTo(x - s * 0.32, HORIZON - s * 0.6);
-        ctx.lineTo(x + s * 0.32, HORIZON - s * 0.6);
-        ctx.closePath();
-        ctx.fill();
+        sctx.fillStyle = '#9db4c2';
+        sctx.beginPath();
+        sctx.moveTo(x, HORIZON - s);
+        sctx.lineTo(x - s * 0.85, HORIZON);
+        sctx.lineTo(x + s * 0.85, HORIZON);
+        sctx.closePath();
+        sctx.fill();
+        sctx.fillStyle = 'rgba(255,255,255,0.8)';
+        sctx.beginPath();
+        sctx.moveTo(x, HORIZON - s);
+        sctx.lineTo(x - s * 0.32, HORIZON - s * 0.6);
+        sctx.lineTo(x + s * 0.32, HORIZON - s * 0.6);
+        sctx.closePath();
+        sctx.fill();
       }
     } else if (theme.skyFx === 'balloon') {
       const t = performance.now() / 1000;
       for (const [base, y, s] of [[500, 40, 46], [2300, 66, 32]]) {
         const x = pan(base, 55) - 60;
         if (x < -60 || x > W + 60) continue;
-        ctx.drawImage(balloonSprite, x, y + Math.sin(t * 0.7 + base) * 5, s, s * 1.33);
+        sctx.drawImage(balloonSprite, x, y + Math.sin(t * 0.7 + base) * 5, s, s * 1.33);
       }
     } else if (theme.skyFx === 'birds') {
       const t = performance.now() / 1000;
-      ctx.strokeStyle = 'rgba(45,55,66,0.8)';
-      ctx.lineWidth = 2;
+      sctx.strokeStyle = 'rgba(45,55,66,0.8)';
+      sctx.lineWidth = 2;
       for (let i = 0; i < 5; i++) {
         const x = pan(i * 640 + t * 26, 70) - 20;
         if (x < -20 || x > W + 20) continue;
         const y = 42 + (i % 3) * 18 + Math.sin(t * 1.2 + i) * 5;
         const flap = Math.sin(t * 7 + i * 1.7) * 5;
-        ctx.beginPath();
-        ctx.moveTo(x - 8, y - flap);
-        ctx.lineTo(x, y);
-        ctx.lineTo(x + 8, y - flap);
-        ctx.stroke();
+        sctx.beginPath();
+        sctx.moveTo(x - 8, y - flap);
+        sctx.lineTo(x, y);
+        sctx.lineTo(x + 8, y - flap);
+        sctx.stroke();
       }
     }
 
     // 地平線の霞（山すそをやわらかく）
-    ctx.fillStyle = hazeGrad;
-    ctx.fillRect(0, HORIZON - 52, W, 52);
+    sctx.fillStyle = hazeGrad;
+    sctx.fillRect(0, HORIZON - 52, W, 52);
 
     // 視点に合わせて流れる雲（大きさに変化をつける）
     const cspan = W * 4;
@@ -2140,9 +2171,13 @@
       let x = (base - heading / (Math.PI * 2) * cspan) % cspan;
       if (x < 0) x += cspan;
       const cw = 52 + (i % 3) * 26;
-      ctx.drawImage(cloudSprite, x - cw, ((i * 41) % 64) + 8, cw, cw * 0.53);
+      sctx.drawImage(cloudSprite, x - cw, ((i * 41) % 64) + 8, cw, cw * 0.53);
     }
-    ctx.restore();
+    sctx.restore();
+
+    // 地平線から下は霞色で埋める（3Dの地面との継ぎ目が出ないように）
+    sctx.fillStyle = `rgb(${theme.fog})`;
+    sctx.fillRect(0, Math.max(0, hor - 2), W, H - hor + 2);
   }
 
   // 高山の夕空に上がる祭りの花火
@@ -2171,17 +2206,17 @@
       const alpha = Math.max(0, 1 - f.t / 1.4);
       // 開いた直後の中心の閃光
       if (f.t < 0.25) {
-        ctx.fillStyle = `rgba(255,255,230,${(0.25 - f.t) * 3})`;
-        ctx.beginPath();
-        ctx.arc(x, f.y, 14, 0, Math.PI * 2);
-        ctx.fill();
+        sctx.fillStyle = `rgba(255,255,230,${(0.25 - f.t) * 3})`;
+        sctx.beginPath();
+        sctx.arc(x, f.y, 14, 0, Math.PI * 2);
+        sctx.fill();
       }
-      ctx.fillStyle = `hsla(${f.hue}, 95%, 65%, ${alpha})`;
+      sctx.fillStyle = `hsla(${f.hue}, 95%, 65%, ${alpha})`;
       for (let j = 0; j < 16; j++) {
         const ang = (j / 16) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.arc(x + Math.cos(ang) * dist, f.y + Math.sin(ang) * dist * 0.85 + ease * 9, 1.8, 0, Math.PI * 2);
-        ctx.fill();
+        sctx.beginPath();
+        sctx.arc(x + Math.cos(ang) * dist, f.y + Math.sin(ang) * dist * 0.85 + ease * 9, 1.8, 0, Math.PI * 2);
+        sctx.fill();
       }
     }
   }
@@ -2339,6 +2374,11 @@
     ctx.translate(-pr.x, -pr.y);
     drawKart(player, pr.x, pr.y, pr.scale);
     ctx.restore();
+    renderPlayerFX(pr);
+  }
+
+  // 自機まわりの画面エフェクト（3D/2D共通。前面レイヤーに描く）
+  function renderPlayerFX(pr) {
     // 雪のダート走行中は雪しぶき
     if (isDirt(player.x, player.y) && Math.abs(player.speed) > 60) {
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
@@ -2427,22 +2467,58 @@
     }
   }
 
-  function render() {
-    const dirX = Math.cos(player.a), dirY = Math.sin(player.a);
-    const camX = player.x - dirX * CAM_BACK;
-    const camY = player.y - dirY * CAM_BACK;
+  // 3D描画用に毎フレームの状態を渡す
+  let glDecos = [];
+  function renderGL(hor) {
+    GL3D.render({
+      x: player.x, z: player.y, heading: player.a,
+      horShift: hor - HORIZON,
+      time: performance.now() / 1000,
+      karts: karts.map((k) => ({
+        x: k.x, z: k.y, a: k.a,
+        lift: k.air > 0 && k.airTotal
+          ? Math.sin(Math.PI * (1 - k.air / k.airTotal)) * 26
+          : 0,
+        roll: k.isPlayer ? steerSmooth * 0.13 : 0,
+        body: k.bodyC, helmet: k.helmetC,
+        boost: k.boost, shield: k.shield,
+        label: !k.isPlayer ? k.label : null,
+        icon: k.spin > 0 && k.crashIcon && CRASH_FX[k.crashIcon]
+          ? CRASH_FX[k.crashIcon].icon : null,
+      })),
+      boxes: itemBoxes.filter((b) => b.respawn <= 0).map((b) => ({ x: b.x, z: b.y })),
+      bananas: bananas.map((b) => ({ x: b.x, z: b.y })),
+      shots: shots.map((s) => ({ x: s.x, z: s.y })),
+      decos: glDecos,
+      sprites: { star: starSprite, banana: bananaSprite, snowball: snowballSprite },
+    });
+  }
 
+  function render() {
     // 坂: 勾配に応じて地平線をなめらかに上下（登りで上がる）
     const targetHor = HORIZON - (hillSlope[player.wp] || 0) * 11;
     horY += (targetHor - horY) * 0.08;
     horY = Math.max(HOR_MIN + 2, Math.min(HORIZON + 30, horY));
     const hor = Math.round(horY);
 
-    renderSky(player.a, hor);
-    renderGround(camX, camY, dirX, dirY, hor);
-    renderFog(hor);
-    renderSprites(camX, camY, dirX, dirY);
-    renderPlayer();
+    renderSky(player.a, hor); // 背面レイヤー（空）
+
+    if (GL3D) {
+      renderGL(hor);
+      ctx.clearRect(0, 0, W, H); // 前面レイヤーはエフェクトのみ
+      renderPlayerFX({ x: W / 2, y: H * 0.72 });
+    } else {
+      // 2Dフォールバック（モード7）
+      const dirX = Math.cos(player.a), dirY = Math.sin(player.a);
+      const camX = player.x - dirX * CAM_BACK;
+      const camY = player.y - dirY * CAM_BACK;
+      ctx.clearRect(0, 0, W, hor); // 空を透かす
+      renderGround(camX, camY, dirX, dirY, hor);
+      renderFog(hor);
+      renderSprites(camX, camY, dirX, dirY);
+      renderPlayer();
+    }
+
     renderAmbient();
     ctx.drawImage(vignette, 0, 0);
     // クラッシュ時のフラッシュ（原因アイテムごとの色）
@@ -2836,6 +2912,7 @@
     get fireworks() { return fireworks; },
     get pads() { return pads; },
     get horizon() { return horY; },
+    get gl() { return !!GL3D; },
     rank: () => rankOf(player).rank,
     give: (t) => { if (player) player.item = t; },
     texURL: () => texCanvas.toDataURL(),
