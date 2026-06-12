@@ -91,6 +91,9 @@
         [140, 600], [150, 360], [180, 170],
       ],
       elev: [[0, 0], [0.18, 0], [0.27, 16], [0.34, 0], [0.52, 0], [0.66, 34], [0.78, 34], [0.9, 0]],
+      // 宮川（町を南北に流れ、コースは鍛冶橋・中橋で2回渡る）
+      river: [[700, 0], [688, 260], [712, 620], [694, 980], [706, 1400]],
+      bridges: [[640, 1348], [760, 1348], [645, 68], [758, 68]],
       theme: {
         grassA: '#9c8a72', grassB: '#92805f',
         road: '#45454d', curbA: '#b71c1c', curbB: '#eeeeee',
@@ -117,6 +120,9 @@
         [170, 250], [300, 180],
       ],
       elev: [[0, 0], [0.2, 0], [0.42, 28], [0.58, 28], [0.78, 0]],
+      // 庄川と荻町の合掌集落
+      river: [[760, 0], [748, 300], [770, 700], [752, 1050], [762, 1400]],
+      village: [560, 780],
       theme: {
         grassA: '#f2f6f7', grassB: '#e3ecef',
         road: '#62707c', curbA: '#1565c0', curbB: '#ffffff',
@@ -135,13 +141,18 @@
       name: '乗鞍スカイライン',
       desc: '雲の上を走る天空の山岳道路。ながれるような高速コーナーが続く。',
       stars: 2, laps: 3, roadW: 155,
+      // 実際の乗鞍スカイライン: 平湯峠からスイッチバックで登り、
+      // 畳平の山頂台地を回って反対側の長い下りで戻る
       ctrl: [
-        [660, 110], [1080, 160], [1290, 380], [1240, 650],
-        [1070, 800], [1220, 1010], [1130, 1250], [800, 1300], [470, 1240],
-        [170, 1280], [120, 1020], [300, 860], [160, 640], [130, 400],
-        [260, 160],
+        [700, 1290], [330, 1250], [150, 1080],
+        [430, 970], [720, 930], [870, 800],
+        [480, 740], [190, 700],
+        [400, 540], [700, 490], [880, 360],
+        [560, 300], [280, 250],
+        [480, 95], [820, 105],
+        [1120, 220], [1280, 520], [1240, 900], [1090, 1180],
       ],
-      elev: [[0, 0], [0.1, 0], [0.4, 90], [0.55, 90], [0.88, 0]],
+      elev: [[0, 0], [0.08, 5], [0.66, 110], [0.76, 110], [0.97, 0]],
       theme: {
         grassA: '#6b7d62', grassB: '#5f7057',
         road: '#4c5258', curbA: '#f9a825', curbB: '#ffffff',
@@ -168,6 +179,8 @@
         [180, 160],
       ],
       elev: [[0, 0], [0.12, 0], [0.35, 0], [0.5, 12], [0.82, 78], [0.86, 78], [0.97, 0]],
+      // 蒲田川（谷あいの渓流）
+      river: [[1396, 980], [1150, 1010], [980, 1180], [940, 1396]],
       theme: {
         grassA: '#4f7a2e', grassB: '#456c28',
         road: '#50565e', curbA: '#ef6c00', curbB: '#ffffff',
@@ -381,6 +394,54 @@
         }
         t.restore();
       }
+    }
+
+    // 標高による地表の変化（森林限界の上は岩肌、さらに上は残雪）
+    if ((course.elev || []).some((e) => e[1] > 55)) {
+      for (let by = 0; by < TEX; by += 8) {
+        for (let bx = 0; bx < TEX; bx += 8) {
+          const h = heightAt(bx + 4, by + 4);
+          if (h > 52) {
+            const k = Math.min(1, (h - 52) / 28);
+            t.fillStyle = `rgba(124,114,102,${(0.45 * k).toFixed(3)})`;
+            t.fillRect(bx, by, 8, 8);
+            if (h > 92) {
+              t.fillStyle = `rgba(244,248,251,${Math.min(0.85, (h - 92) / 16).toFixed(3)})`;
+              t.fillRect(bx, by, 8, 8);
+            }
+          }
+        }
+      }
+    }
+
+    // 実在の川（宮川・庄川・蒲田川）。道路は後から上に描かれて橋になる
+    if (course.river) {
+      const S = TEX / 1400;
+      const pts = course.river.map((p) => [p[0] * S, p[1] * S]);
+      t.lineJoin = 'round';
+      t.lineCap = 'round';
+      const drawRiver = (width, color) => {
+        t.strokeStyle = color;
+        t.lineWidth = width;
+        t.beginPath();
+        t.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) {
+          const mx = (pts[i - 1][0] + pts[i][0]) / 2;
+          const my = (pts[i - 1][1] + pts[i][1]) / 2;
+          t.quadraticCurveTo(pts[i - 1][0], pts[i - 1][1], mx, my);
+        }
+        t.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+        t.stroke();
+      };
+      drawRiver(46, '#8a9478');             // 川岸
+      drawRiver(34, '#5b8fb9');             // 水面
+      drawRiver(30, '#6f9fc8');
+      // 流れのきらめき
+      t.strokeStyle = 'rgba(255,255,255,0.35)';
+      t.lineWidth = 3;
+      t.setLineDash([14, 30]);
+      drawRiver(3, 'rgba(255,255,255,0.35)');
+      t.setLineDash([]);
     }
 
     t.lineJoin = 'round';
@@ -1278,14 +1339,41 @@
     for (const [type, weight] of theme.deco) {
       for (let i = 0; i < weight; i++) table.push(type);
     }
+    // 森林限界より上では木が生えない（岩肌に合わせて岩へ）
+    const highCourse = (course.elev || []).some((e) => e[1] > 55);
+    const adjustForAltitude = (type, x, y) => {
+      if (!highCourse) return type;
+      if (heightAt(x, y) > 56 && DECO[type].w < 90 && type !== 'rock' && type !== 'goat') return 'rock';
+      return type;
+    };
     for (let i = 26; i < N_WP - 14; i += 4) {
       if (rnd() < 0.35) continue;
-      const type = table[(rnd() * table.length) | 0];
+      let type = table[(rnd() * table.length) | 0];
       const big = DECO[type].w >= 90;
       const side = rnd() < 0.5 ? -1 : 1;
       // 25%は遠めの2列目に置いて奥行きを出す
       const lat = side * (ROADW / 2 + 34 + (big ? 30 : 0) + rnd() * 55 + (rnd() < 0.25 ? 100 : 0));
+      const w = wps[i];
+      type = adjustForAltitude(type, w.x - w.ty * lat, w.y + w.tx * lat);
       placeDeco(i, lat, type, 0.85 + rnd() * 0.45);
+    }
+    // 荻町の合掌集落（白川郷）
+    if (course.village) {
+      const S = TEX / 1400;
+      for (let i = 0; i < 9; i++) {
+        const x = (course.village[0] + (rnd() - 0.5) * 280) * S;
+        const y = (course.village[1] + (rnd() - 0.5) * 330) * S;
+        if (x < 40 || y < 40 || x > TEX - 40 || y > TEX - 40 || isRoad(x, y)) continue;
+        decorations.push({ x, y, type: i % 3 === 2 ? 'snowtree' : 'gassho', size: 0.9 + rnd() * 0.35 });
+      }
+    }
+    // 川を渡る場所の橋の欄干（中橋など）
+    if (course.bridges) {
+      const S = TEX / 1400;
+      for (const [bx, by] of course.bridges) {
+        const x = bx * S, y = by * S;
+        if (!isRoad(x, y)) decorations.push({ x, y, type: 'nakabashi', size: 0.85 });
+      }
     }
     // スタート地点: 観客席とのぼり旗の列でにぎやかに
     placeDeco(8, ROADW / 2 + 105, 'grandstand', 1.05);
@@ -1299,7 +1387,7 @@
       const x = 60 + rnd() * (TEX - 120);
       const y = 60 + rnd() * (TEX - 120);
       if (isRoad(x, y)) continue;
-      const type = table[(rnd() * table.length) | 0];
+      const type = adjustForAltitude(table[(rnd() * table.length) | 0], x, y);
       decorations.push({ x, y, type, size: 0.8 + rnd() * 0.55 });
     }
   }
@@ -1396,15 +1484,17 @@
         }
         const dist = Math.sqrt(bd);
         const th = trackH[bw];
+        // コースの標高は周囲の山体にも染み出す（山頂エリアが本物の山になる）
+        const massif = th * Math.max(0, 1 - (dist - corridor) / 900);
         let h;
         if (dist < corridor) {
           h = th;
         } else if (dist < corridor + blendW) {
           const t = (dist - corridor) / blendW;
           const s = t * t * (3 - 2 * t);
-          h = th * (1 - s) + wildAt(x, z) * s;
+          h = th * (1 - s) + (wildAt(x, z) + massif) * s;
         } else {
-          h = wildAt(x, z);
+          h = wildAt(x, z) + massif;
         }
         // ワールドの端は0へ
         const m = 130;
