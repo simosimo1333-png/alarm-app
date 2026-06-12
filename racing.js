@@ -34,6 +34,7 @@
   const hudSpeed = document.getElementById('hud-speed');
   const hudItem = document.getElementById('hud-item');
   const msgEl = document.getElementById('message');
+  const wrongwayEl = document.getElementById('wrongway');
   const panel = document.getElementById('panel');
   const panelText = document.getElementById('panel-text');
   const panelTitle = panel.querySelector('h2');
@@ -62,17 +63,19 @@
           { color: '#5d8aa0', amp: 20, speed: 110 },
         ],
         deco: [['tree', 6], ['cow', 1]],
+        ambient: 'fluff', skyFx: 'balloon',
       },
     },
     {
       name: '高山 古い町並みGP',
       desc: '城下町・高山の古い町並みを夕暮れにめぐる市街地コース。',
       stars: 2, laps: 3, roadW: 120,
+      // 先頭はスタート地点。直線区間に置く（急コーナー上だとwp追跡が乱れる）
       ctrl: [
-        [180, 170], [620, 130], [1090, 160], [1270, 330], [1250, 620],
+        [620, 130], [1090, 160], [1270, 330], [1250, 620],
         [1060, 720], [1040, 950], [1240, 1060], [1230, 1270], [900, 1290],
         [560, 1250], [200, 1280], [130, 1040], [330, 930], [310, 700],
-        [140, 600], [150, 360],
+        [140, 600], [150, 360], [180, 170],
       ],
       theme: {
         grassA: '#9c8a72', grassB: '#92805f',
@@ -84,6 +87,7 @@
           { color: '#7c6b91', amp: 18, speed: 110 },
         ],
         deco: [['machiya', 4], ['sakagura', 2], ['yatai', 1], ['lantern', 2], ['nakabashi', 1]],
+        ambient: 'sakura', skyFx: 'fireworks',
       },
     },
     {
@@ -92,10 +96,10 @@
       stars: 2, laps: 3, roadW: 128, turnMul: 0.85,
       dirt: { sections: 7, len: 14, mul: 0.68 },
       ctrl: [
-        [300, 180], [700, 120], [1100, 180], [1290, 420], [1230, 690],
+        [700, 120], [1100, 180], [1290, 420], [1230, 690],
         [1050, 840], [1130, 1090], [950, 1270], [640, 1300], [330, 1230],
         [150, 1010], [260, 820], [430, 700], [330, 540], [150, 430],
-        [170, 250],
+        [170, 250], [300, 180],
       ],
       theme: {
         grassA: '#f2f6f7', grassB: '#e3ecef',
@@ -107,6 +111,7 @@
           { color: '#aac4d4', amp: 20, speed: 110, snow: true },
         ],
         deco: [['gassho', 3], ['snowtree', 3], ['snowman', 1]],
+        ambient: 'snow', skyFx: 'village',
       },
     },
     {
@@ -114,9 +119,10 @@
       desc: '雲の上を走る天空の山岳道路。ながれるような高速コーナーが続く。',
       stars: 2, laps: 3, roadW: 124,
       ctrl: [
-        [260, 160], [660, 110], [1080, 160], [1290, 380], [1240, 650],
+        [660, 110], [1080, 160], [1290, 380], [1240, 650],
         [1070, 800], [1220, 1010], [1130, 1250], [800, 1300], [470, 1240],
         [170, 1280], [120, 1020], [300, 860], [160, 640], [130, 400],
+        [260, 160],
       ],
       theme: {
         grassA: '#6b7d62', grassB: '#5f7057',
@@ -128,6 +134,7 @@
           { color: '#90a8ba', amp: 26, speed: 110, snow: true },
         ],
         deco: [['rock', 3], ['snowtree', 2], ['goat', 1]],
+        ambient: 'mist', skyFx: 'birds',
       },
     },
     {
@@ -135,11 +142,12 @@
       desc: '紅葉の奥飛騨をのぼる、狭い道とヘアピン連続の難関峠コース。',
       stars: 3, laps: 2, roadW: 106,
       ctrl: [
-        [180, 160], [720, 110], [1180, 170],
+        [720, 110], [1180, 170],
         [1290, 440], [1230, 800], [1280, 1100], [1060, 1280],
         [620, 1310], [260, 1260],
         [170, 1060], [760, 1000], [900, 840],
         [300, 760], [170, 580], [820, 520],
+        [180, 160],
       ],
       theme: {
         grassA: '#4f7a2e', grassB: '#456c28',
@@ -151,6 +159,7 @@
           { color: '#6d8296', amp: 22, speed: 110 },
         ],
         deco: [['autumn', 3], ['tree', 2], ['onsen', 1]],
+        ambient: 'leaves',
       },
     },
   ];
@@ -222,19 +231,17 @@
   function buildTrack(ctrl) {
     wps = [];
     const segs = ctrl.length;
-    const per = Math.floor(N_WP / segs);
-    for (let s = 0; s < segs; s++) {
+    // N_WP個を全周に均等配置（端数で重複点を作らない）
+    for (let i = 0; i < N_WP; i++) {
+      const f = (i / N_WP) * segs;
+      const s = Math.floor(f) % segs;
       const p0 = ctrl[(s - 1 + segs) % segs];
       const p1 = ctrl[s];
       const p2 = ctrl[(s + 1) % segs];
       const p3 = ctrl[(s + 2) % segs];
-      for (let i = 0; i < per; i++) {
-        const [x, y] = catmullRom(p0, p1, p2, p3, i / per);
-        wps.push({ x, y, tx: 0, ty: 0 });
-      }
+      const [x, y] = catmullRom(p0, p1, p2, p3, f - Math.floor(f));
+      wps.push({ x, y, tx: 0, ty: 0 });
     }
-    // セグメント数で割り切れない分は最後を補間して埋める
-    while (wps.length < N_WP) wps.push({ ...wps[wps.length - 1] });
     for (let i = 0; i < N_WP; i++) {
       const a = wps[(i + 1) % N_WP], b = wps[(i - 1 + N_WP) % N_WP];
       const dx = a.x - b.x, dy = a.y - b.y;
@@ -771,6 +778,112 @@
   }
   const glowSprite = makeGlowSprite();
 
+  // 熱気球（高原コースの空に浮かぶ）
+  function makeBalloonSprite() {
+    const c = document.createElement('canvas');
+    c.width = 48;
+    c.height = 64;
+    const g = c.getContext('2d');
+    // 球皮（カラフルな縦縞）
+    g.save();
+    g.beginPath();
+    g.arc(24, 20, 17, 0, Math.PI * 2);
+    g.clip();
+    const stripes = ['#e74c3c', '#f6c344', '#3aa3dd', '#e74c3c', '#f6c344', '#3aa3dd'];
+    for (let i = 0; i < 6; i++) {
+      g.fillStyle = stripes[i];
+      g.fillRect(7 + i * 6, 2, 6, 38);
+    }
+    g.restore();
+    g.strokeStyle = 'rgba(0,0,0,0.25)';
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.arc(24, 20, 17, 0, Math.PI * 2);
+    g.stroke();
+    // 吊りロープとバスケット
+    g.strokeStyle = '#6d4c41';
+    g.beginPath();
+    g.moveTo(16, 34); g.lineTo(20, 50);
+    g.moveTo(32, 34); g.lineTo(28, 50);
+    g.stroke();
+    g.fillStyle = '#8d6e63';
+    g.fillRect(18, 50, 12, 9);
+    return c;
+  }
+  const balloonSprite = makeBalloonSprite();
+
+  // コースごとの環境パーティクル（雪・桜・紅葉・綿毛・霧）
+  let ambient = [];
+  let ambientType = null;
+  function buildAmbient() {
+    ambientType = theme.ambient || null;
+    ambient = [];
+    if (!ambientType) return;
+    const n = ambientType === 'mist' ? 7 : 42;
+    for (let i = 0; i < n; i++) {
+      ambient.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        v: 0.5 + Math.random(),
+        r: Math.random(),
+        ph: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  function renderAmbient() {
+    if (!ambientType) return;
+    const t = performance.now() / 1000;
+    for (const p of ambient) {
+      if (ambientType === 'snow') {
+        p.y += p.v * 1.1;
+        p.x += Math.sin(t * 1.5 + p.ph) * 0.5;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.5 + p.r * 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (ambientType === 'sakura') {
+        p.y += p.v * 0.8;
+        p.x += 0.6 + Math.sin(t * 2 + p.ph) * 0.9;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(t * 2 + p.ph);
+        ctx.fillStyle = p.r > 0.5 ? 'rgba(255,183,197,0.9)' : 'rgba(255,160,180,0.85)';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 3.6 + p.r * 2, 2.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else if (ambientType === 'leaves') {
+        p.y += p.v * 1.3;
+        p.x += Math.sin(t * 2.2 + p.ph) * 1.2;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(t * 3 + p.ph);
+        ctx.fillStyle = p.r > 0.66 ? '#e07a2f' : p.r > 0.33 ? '#c84f2f' : '#d9a032';
+        ctx.fillRect(-3, -2, 6 + p.r * 3, 4);
+        ctx.restore();
+      } else if (ambientType === 'fluff') {
+        p.y += Math.sin(t * 0.9 + p.ph) * 0.3 - 0.1;
+        p.x += 0.35 + p.v * 0.25;
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.4 + p.r * 1.4, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (ambientType === 'mist') {
+        p.x += 0.35 + p.v * 0.4;
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        ctx.ellipse(p.x, HORIZON * 0.6 + p.ph * 28, 130 + p.r * 160, 17 + p.r * 18, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 画面外に出たら反対側から
+      if (p.y > H + 12) { p.y = -10; p.x = Math.random() * W; }
+      if (p.y < -14) p.y = H + 8;
+      if (p.x > W + 180) p.x = -170;
+      if (p.x < -180) p.x = W + 170;
+    }
+  }
+
   // 画面端を少し落とすビネット（画の締まりを出す）
   const vignette = (() => {
     const c = document.createElement('canvas');
@@ -863,6 +976,7 @@
     buildTexture();
     buildDecorations();
     buildSky();
+    buildAmbient();
   }
 
   // ===== カートスプライト（後ろ姿・高精細） =====
@@ -1068,6 +1182,9 @@
   let crashFxT = 0;      // 「なにに当たったか」表示の残り時間
   let crashFxCause = null;
   let lastZapT = -99;    // かみなりの連発防止
+  let wrongWayT = 0;     // 逆走の継続時間
+  let lastWrongBeep = 0;
+  let finalLapShown = false;
   let state = 'title';   // title | count | race | finished
   let countT = 0;
   let raceTime = 0;
@@ -1174,6 +1291,8 @@
       spin: 0,
       shield: 0,
       aiItemT: 0,
+      stuckT: 0,
+      reverseT: 0,
       finished: false,
     };
   }
@@ -1188,6 +1307,9 @@
     flashT = 0;
     crashFxT = 0;
     lastZapT = -99;
+    wrongWayT = 0;
+    finalLapShown = false;
+    wrongwayEl.classList.add('hidden');
     remoteTarget = null;
     remoteFinish = null;
 
@@ -1334,10 +1456,22 @@
       brake = input.down;
       if (itemPressed) { useItem(k); }
     } else if ((!k.isPlayer || DEMO) && state !== 'count') {
-      const ai = steerForCpu(k);
-      steer = ai.steer;
-      gas = true;
-      brake = ai.brake;
+      // スタック検出: 低速のまま動けなくなったら少しバックして立て直す
+      if (state === 'race' && Math.abs(k.speed) < 25) k.stuckT = (k.stuckT || 0) + dt;
+      else k.stuckT = 0;
+      if (k.reverseT > 0) {
+        k.reverseT -= dt;
+        steer = -steerForCpu(k).steer; // バック中は逆ハンドルで目標へ向ける
+        brake = true;
+      } else if (k.stuckT > 1.2) {
+        k.stuckT = 0;
+        k.reverseT = 0.9;
+      } else {
+        const ai = steerForCpu(k);
+        steer = ai.steer;
+        gas = true;
+        brake = ai.brake;
+      }
       // ランダムなタイミングでアイテム使用
       if (k.item) {
         k.aiItemT -= dt;
@@ -1370,7 +1504,9 @@
     if (k.speed < -120) k.speed = -120;
     if (!gas && !brake && Math.abs(k.speed) < 4) k.speed = 0;
 
-    const speedFactor = Math.min(1, Math.abs(k.speed) / (MAX_SPEED * 0.45));
+    // 低速でも最低限ハンドルが効く（壁に正面から刺さっても抜けられる）
+    let speedFactor = Math.min(1, Math.abs(k.speed) / (MAX_SPEED * 0.45));
+    if (Math.abs(k.speed) > 5) speedFactor = Math.max(speedFactor, 0.3);
     const turnMul = (course.turnMul || 1) * (onDirt ? 0.85 : 1);
     k.a += steer * TURN_RATE * turnMul * speedFactor * Math.sign(k.speed || 1) * dt;
 
@@ -1667,6 +1803,59 @@
       }
     }
 
+    // コースごとの空の演出
+    const span4 = W * 4;
+    const pan = (base, speed) => {
+      let x = (base - (heading / (Math.PI * 2)) * span4 * (speed / 100)) % span4;
+      if (x < 0) x += span4;
+      return x;
+    };
+    if (theme.skyFx === 'fireworks') {
+      renderFireworks(pan);
+    } else if (theme.skyFx === 'village') {
+      // 遠くに合掌造りの集落のシルエット
+      for (const [base, s] of [[300, 13], [430, 10], [560, 16], [1500, 12], [1650, 14], [2400, 11]]) {
+        const x = pan(base, 34) - 40;
+        if (x < -40 || x > W + 40) continue;
+        ctx.fillStyle = '#9db4c2';
+        ctx.beginPath();
+        ctx.moveTo(x, HORIZON - s);
+        ctx.lineTo(x - s * 0.85, HORIZON);
+        ctx.lineTo(x + s * 0.85, HORIZON);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.beginPath();
+        ctx.moveTo(x, HORIZON - s);
+        ctx.lineTo(x - s * 0.32, HORIZON - s * 0.6);
+        ctx.lineTo(x + s * 0.32, HORIZON - s * 0.6);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else if (theme.skyFx === 'balloon') {
+      const t = performance.now() / 1000;
+      for (const [base, y, s] of [[500, 40, 46], [2300, 66, 32]]) {
+        const x = pan(base, 55) - 60;
+        if (x < -60 || x > W + 60) continue;
+        ctx.drawImage(balloonSprite, x, y + Math.sin(t * 0.7 + base) * 5, s, s * 1.33);
+      }
+    } else if (theme.skyFx === 'birds') {
+      const t = performance.now() / 1000;
+      ctx.strokeStyle = 'rgba(45,55,66,0.8)';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 5; i++) {
+        const x = pan(i * 640 + t * 26, 70) - 20;
+        if (x < -20 || x > W + 20) continue;
+        const y = 42 + (i % 3) * 18 + Math.sin(t * 1.2 + i) * 5;
+        const flap = Math.sin(t * 7 + i * 1.7) * 5;
+        ctx.beginPath();
+        ctx.moveTo(x - 8, y - flap);
+        ctx.lineTo(x, y);
+        ctx.lineTo(x + 8, y - flap);
+        ctx.stroke();
+      }
+    }
+
     // 地平線の霞（山すそをやわらかく）
     ctx.fillStyle = hazeGrad;
     ctx.fillRect(0, HORIZON - 52, W, 52);
@@ -1679,6 +1868,47 @@
       if (x < 0) x += cspan;
       const cw = 52 + (i % 3) * 26;
       ctx.drawImage(cloudSprite, x - cw, ((i * 41) % 64) + 8, cw, cw * 0.53);
+    }
+  }
+
+  // 高山の夕空に上がる祭りの花火
+  let fireworks = [];
+  let fwTimer = 1.5;
+  function renderFireworks(pan) {
+    fwTimer -= 1 / 60;
+    if (fwTimer <= 0) {
+      fireworks.push({
+        base: Math.random() * W * 4,
+        y: 18 + Math.random() * 70,
+        t: 0,
+        hue: [350, 45, 200, 130, 280][(Math.random() * 5) | 0],
+      });
+      fwTimer = 2.2 + Math.random() * 3;
+      beep(140 + Math.random() * 80, 0.25, 0.05, 'triangle'); // 遠くの「ぽん」
+    }
+    for (let i = fireworks.length - 1; i >= 0; i--) {
+      const f = fireworks[i];
+      f.t += 1 / 60;
+      if (f.t > 1.4) { fireworks.splice(i, 1); continue; }
+      const x = pan(f.base, 40);
+      if (x < -80 || x > W + 80) continue;
+      const ease = 1 - Math.pow(1 - Math.min(1, f.t / 1.1), 2);
+      const dist = ease * 44;
+      const alpha = Math.max(0, 1 - f.t / 1.4);
+      // 開いた直後の中心の閃光
+      if (f.t < 0.25) {
+        ctx.fillStyle = `rgba(255,255,230,${(0.25 - f.t) * 3})`;
+        ctx.beginPath();
+        ctx.arc(x, f.y, 14, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = `hsla(${f.hue}, 95%, 65%, ${alpha})`;
+      for (let j = 0; j < 16; j++) {
+        const ang = (j / 16) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(ang) * dist, f.y + Math.sin(ang) * dist * 0.85 + ease * 9, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 
@@ -1924,6 +2154,7 @@
     renderFog();
     renderSprites(camX, camY, dirX, dirY);
     renderPlayer();
+    renderAmbient();
     ctx.drawImage(vignette, 0, 0);
     // クラッシュ時のフラッシュ（原因アイテムごとの色）
     if (flashT > 0) {
@@ -2261,6 +2492,33 @@
       if (!player.finished) raceTime += dt;
       updateWorld(dt);
       netTick(now);
+
+      // 逆走アナウンス（進行方向と道の向きが0.6秒以上逆）
+      const wpv = wps[player.wp];
+      const dirDot = Math.cos(player.a) * wpv.tx + Math.sin(player.a) * wpv.ty;
+      const wrong = state === 'race' && !player.finished &&
+        player.spin <= 0 && player.speed > 40 && dirDot < -0.25;
+      wrongWayT = wrong ? wrongWayT + dt : 0;
+      const showWrong = wrongWayT > 0.6;
+      wrongwayEl.classList.toggle('hidden', !showWrong);
+      if (showWrong && now - lastWrongBeep > 900) {
+        lastWrongBeep = now;
+        beep(310, 0.12, 0.12, 'square');
+        buzz(40);
+      }
+
+      // ファイナルラップ演出
+      if (state === 'race' && !finalLapShown && LAPS > 1 &&
+        player.lap === LAPS && !player.finished) {
+        finalLapShown = true;
+        msgEl.textContent = 'ファイナルラップ！';
+        beep(660, 0.12, 0.12, 'square');
+        setTimeout(() => beep(880, 0.12, 0.12, 'square'), 130);
+        setTimeout(() => beep(1108, 0.25, 0.12, 'square'), 260);
+        setTimeout(() => {
+          if (msgEl.textContent === 'ファイナルラップ！') msgEl.textContent = '';
+        }, 1600);
+      }
     }
 
     flashT = Math.max(0, flashT - dt);
@@ -2284,6 +2542,7 @@
     get room() { return roomCode; },
     get state() { return state; },
     get shots() { return shots; },
+    get fireworks() { return fireworks; },
     give: (t) => { if (player) player.item = t; },
     texURL: () => texCanvas.toDataURL(),
     isDirt, isRoad,

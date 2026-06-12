@@ -140,6 +140,30 @@ h1 {
   pointer-events: none;
 }
 
+/* ---- 逆走アナウンス ---- */
+#wrongway {
+  position: absolute;
+  top: 16%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 22px;
+  border-radius: 999px;
+  background: rgba(198, 30, 30, 0.85);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: bold;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: wrongway-pulse 0.5s infinite alternate;
+}
+
+@keyframes wrongway-pulse {
+  from { opacity: 1; transform: translateX(-50%) scale(1); }
+  to   { opacity: 0.75; transform: translateX(-50%) scale(1.06); }
+}
+
 /* ---- タイトル / リザルトパネル ---- */
 #panel {
   position: absolute;
