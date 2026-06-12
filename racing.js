@@ -8,7 +8,7 @@
   const FOCAL = 454;               // 焦点距離（投影スケール）
   const CAM_H = 34;                // カメラの高さ
   const CAM_BACK = 70;             // 自機の何ユニット後ろから見るか
-  const TEX = 1400;                // コーステクスチャの一辺（ワールドの広さ）
+  const TEX = 1800;                // コーステクスチャの一辺（ワールドの広さ）
   const MIP = TEX / 2;             // 遠景用の縮小テクスチャの一辺
   const N_WP = 560;                // ウェイポイント数
   const MM = 180;                  // ミニマップの一辺
@@ -59,7 +59,7 @@
     {
       name: '飛騨高原サーキット',
       desc: '飛騨の高原を駆け抜ける、ゆったり基本コース。',
-      stars: 1, laps: 3, roadW: 132,
+      stars: 1, laps: 3, roadW: 165,
       ctrl: [
         [700, 130], [1010, 170], [1230, 330], [1280, 620], [1180, 880],
         [1260, 1130], [1040, 1290], [760, 1230], [520, 1300], [260, 1240],
@@ -74,14 +74,14 @@
           { color: '#9bc4d6', amp: 30, speed: 60, snow: true },
           { color: '#5d8aa0', amp: 20, speed: 110 },
         ],
-        deco: [['tree', 6], ['cow', 1]],
+        deco: [['tree', 6], ['cow', 1], ['flower', 2]],
         ambient: 'fluff', skyFx: 'balloon',
       },
     },
     {
       name: '高山 古い町並みGP',
       desc: '夕暮れの城下町。町家・祭屋台・さるぼぼ・みたらし団子がお出迎え。',
-      stars: 2, laps: 3, roadW: 120,
+      stars: 2, laps: 3, roadW: 150,
       // 先頭はスタート地点。直線区間に置く（急コーナー上だとwp追跡が乱れる）
       ctrl: [
         [620, 130], [1090, 160], [1270, 330], [1250, 620],
@@ -98,7 +98,7 @@
           { color: '#9b8aa8', amp: 26, speed: 60 },
           { color: '#7c6b91', amp: 18, speed: 110 },
         ],
-        deco: [['machiya', 3], ['sakagura', 2], ['yatai', 1], ['lantern', 1], ['nakabashi', 1], ['sarubobo', 2], ['dango', 1], ['torii', 1]],
+        deco: [['machiya', 3], ['sakagura', 2], ['yatai', 1], ['lantern', 1], ['nakabashi', 1], ['sarubobo', 2], ['dango', 1], ['torii', 1], ['nobori', 1]],
         ambient: 'sakura', skyFx: 'fireworks',
         light: { dir: [-0.75, -0.5, 0.2], color: [1, 0.8, 0.63], amb: 0.55 },
       },
@@ -106,7 +106,7 @@
     {
       name: '白川郷 雪のサーキット',
       desc: '合掌造りの里・白川郷をめぐる雪道コース。ところどころ雪のダートですべる！',
-      stars: 2, laps: 3, roadW: 128, turnMul: 0.85,
+      stars: 2, laps: 3, roadW: 160, turnMul: 0.85,
       dirt: { sections: 7, len: 14, mul: 0.68 },
       ctrl: [
         [700, 120], [1100, 180], [1290, 420], [1230, 690],
@@ -123,7 +123,7 @@
           { color: '#d4e3ec', amp: 32, speed: 60, snow: true },
           { color: '#aac4d4', amp: 20, speed: 110, snow: true },
         ],
-        deco: [['gassho', 3], ['snowtree', 3], ['snowman', 1]],
+        deco: [['gassho', 3], ['snowtree', 3], ['snowman', 1], ['waterwheel', 1]],
         ambient: 'snow', skyFx: 'village',
         light: { dir: [-0.4, -0.85, 0.3], color: [0.93, 0.97, 1], amb: 0.74 },
       },
@@ -131,7 +131,7 @@
     {
       name: '乗鞍スカイライン',
       desc: '雲の上を走る天空の山岳道路。ながれるような高速コーナーが続く。',
-      stars: 2, laps: 3, roadW: 124,
+      stars: 2, laps: 3, roadW: 155,
       ctrl: [
         [660, 110], [1080, 160], [1290, 380], [1240, 650],
         [1070, 800], [1220, 1010], [1130, 1250], [800, 1300], [470, 1240],
@@ -147,14 +147,14 @@
           { color: '#e3edf4', amp: 42, speed: 60, snow: true },
           { color: '#90a8ba', amp: 26, speed: 110, snow: true },
         ],
-        deco: [['rock', 3], ['snowtree', 2], ['goat', 1]],
+        deco: [['rock', 3], ['snowtree', 2], ['goat', 1], ['flower', 1]],
         ambient: 'mist', skyFx: 'birds',
       },
     },
     {
       name: '奥飛騨 つづら折り峠',
       desc: '紅葉の奥飛騨をのぼる、狭い道とヘアピン連続の難関峠コース。',
-      stars: 3, laps: 2, roadW: 106,
+      stars: 3, laps: 2, roadW: 132,
       ctrl: [
         [720, 110], [1180, 170],
         [1290, 440], [1230, 800], [1280, 1100], [1060, 1280],
@@ -172,7 +172,7 @@
           { color: '#8c9fb0', amp: 34, speed: 60, snow: true },
           { color: '#6d8296', amp: 22, speed: 110 },
         ],
-        deco: [['autumn', 3], ['tree', 2], ['onsen', 1]],
+        deco: [['autumn', 3], ['tree', 2], ['onsen', 1], ['flower', 1]],
         ambient: 'leaves',
         light: { dir: [-0.55, -0.7, 0.3], color: [1, 0.92, 0.8], amb: 0.6 },
       },
@@ -249,14 +249,17 @@
   function buildTrack(ctrl) {
     wps = [];
     const segs = ctrl.length;
+    // 制御点は1400基準で定義されているのでワールドサイズに合わせて拡大
+    const S = TEX / 1400;
+    const pts = ctrl.map((p) => [p[0] * S, p[1] * S]);
     // N_WP個を全周に均等配置（端数で重複点を作らない）
     for (let i = 0; i < N_WP; i++) {
       const f = (i / N_WP) * segs;
       const s = Math.floor(f) % segs;
-      const p0 = ctrl[(s - 1 + segs) % segs];
-      const p1 = ctrl[s];
-      const p2 = ctrl[(s + 1) % segs];
-      const p3 = ctrl[(s + 2) % segs];
+      const p0 = pts[(s - 1 + segs) % segs];
+      const p1 = pts[s];
+      const p2 = pts[(s + 1) % segs];
+      const p3 = pts[(s + 2) % segs];
       const [x, y] = catmullRom(p0, p1, p2, p3, f - Math.floor(f));
       wps.push({ x, y, tx: 0, ty: 0 });
     }
@@ -860,6 +863,128 @@
     return c;
   }
 
+  function makeGrandstandSprite() {
+    // 観客席（スタート地点の応援スタンド）
+    const c = document.createElement('canvas');
+    c.width = 150;
+    c.height = 96;
+    const g = c.getContext('2d');
+    // 屋根（青白ストライプ）
+    g.fillStyle = '#1565c0';
+    g.fillRect(0, 0, 150, 16);
+    g.fillStyle = '#fff';
+    for (let x = 8; x < 150; x += 24) g.fillRect(x, 0, 12, 16);
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    g.fillRect(0, 13, 150, 3);
+    // 支柱
+    g.fillStyle = '#78909c';
+    g.fillRect(4, 16, 7, 78);
+    g.fillRect(139, 16, 7, 78);
+    // 段々と観客（カラフルな頭）
+    const heads = ['#ef5350', '#ffca28', '#66bb6a', '#42a5f5', '#ab47bc', '#ff7043', '#fff'];
+    for (let row = 0; row < 4; row++) {
+      const y = 24 + row * 18;
+      g.fillStyle = '#90a4ae';
+      g.fillRect(8, y + 10, 134, 8);
+      for (let i = 0; i < 15; i++) {
+        g.fillStyle = heads[(i * 5 + row * 3) % heads.length];
+        g.beginPath();
+        g.arc(15 + i * 8.6 + ((row * 7 + i * 3) % 4), y + 5, 3.6, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+    return c;
+  }
+
+  function makeNoboriSprite() {
+    // のぼり旗（祭の応援）
+    const c = document.createElement('canvas');
+    c.width = 36;
+    c.height = 92;
+    const g = c.getContext('2d');
+    // 竿
+    g.fillStyle = '#8d6e63';
+    g.fillRect(4, 2, 4, 90);
+    g.fillRect(4, 4, 28, 3);
+    // 旗（朱地に白文字）
+    g.fillStyle = '#d23a2e';
+    g.fillRect(10, 8, 22, 62);
+    g.strokeStyle = 'rgba(255,255,255,0.85)';
+    g.lineWidth = 2;
+    g.strokeRect(11, 9, 20, 60);
+    g.fillStyle = '#fff';
+    g.font = 'bold 15px serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('祭', 21, 26);
+    g.fillText('り', 21, 48);
+    return c;
+  }
+
+  function makeFlowerSprite() {
+    // 花畑のしげみ
+    const c = document.createElement('canvas');
+    c.width = 56;
+    c.height = 36;
+    const g = c.getContext('2d');
+    g.fillStyle = '#4c7d3a';
+    g.beginPath();
+    g.ellipse(28, 28, 26, 9, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#5b9446';
+    g.beginPath();
+    g.ellipse(28, 24, 22, 9, 0, 0, Math.PI * 2);
+    g.fill();
+    const cols = ['#ff8fab', '#fff', '#ffd54a', '#ff8fab', '#fff'];
+    for (let i = 0; i < 12; i++) {
+      g.fillStyle = cols[i % cols.length];
+      g.beginPath();
+      g.arc(8 + (i * 37) % 42, 18 + (i * 13) % 12, 2.6, 0, Math.PI * 2);
+      g.fill();
+    }
+    return c;
+  }
+
+  function makeWaterwheelSprite() {
+    // 水車小屋（白川郷の里山風景）
+    const c = document.createElement('canvas');
+    c.width = 104;
+    c.height = 92;
+    const g = c.getContext('2d');
+    // 小屋
+    g.fillStyle = '#8d6e63';
+    g.beginPath();
+    g.moveTo(64, 8); g.lineTo(40, 36); g.lineTo(88, 36);
+    g.closePath(); g.fill();
+    g.fillStyle = '#fff';
+    g.beginPath();
+    g.moveTo(64, 6); g.lineTo(52, 20); g.lineTo(76, 20);
+    g.closePath(); g.fill();
+    g.fillStyle = '#efebe9';
+    g.fillRect(46, 36, 36, 50);
+    g.fillStyle = '#4e342e';
+    g.fillRect(58, 62, 14, 24);
+    // 水車
+    g.strokeStyle = '#5d4037';
+    g.lineWidth = 7;
+    g.beginPath();
+    g.arc(26, 58, 24, 0, Math.PI * 2);
+    g.stroke();
+    g.lineWidth = 3.5;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      g.beginPath();
+      g.moveTo(26, 58);
+      g.lineTo(26 + Math.cos(a) * 24, 58 + Math.sin(a) * 24);
+      g.stroke();
+    }
+    g.fillStyle = '#6d4c41';
+    g.beginPath();
+    g.arc(26, 58, 5, 0, Math.PI * 2);
+    g.fill();
+    return c;
+  }
+
   function makeNakabashiSprite() {
     // 中橋（宮川にかかる朱塗りの欄干）
     const c = document.createElement('canvas');
@@ -1089,11 +1214,25 @@
     torii:    { img: makeToriiSprite(), w: 82 },
     onsen:    { img: makeOnsenSprite(), w: 36 },
     rock:     { img: makeRockSprite(), w: 50 },
+    grandstand: { img: makeGrandstandSprite(), w: 150 },
+    nobori:   { img: makeNoboriSprite(), w: 30 },
+    flower:   { img: makeFlowerSprite(), w: 40 },
+    waterwheel: { img: makeWaterwheelSprite(), w: 88 },
     cow:      { img: makeEmojiSprite('🐄'), w: 26 },
     lantern:  { img: makeEmojiSprite('🏮'), w: 20 },
     snowman:  { img: makeEmojiSprite('⛄'), w: 30 },
     goat:     { img: makeEmojiSprite('🐐'), w: 24 },
   };
+
+  // wpの横（lat倍率）に飾りを置く。道路上や場外はスキップ
+  function placeDeco(wpIdx, lat, type, size) {
+    const w = wps[(wpIdx + N_WP) % N_WP];
+    const x = w.x - w.ty * lat;
+    const y = w.y + w.tx * lat;
+    if (x < 30 || y < 30 || x > TEX - 30 || y > TEX - 30) return;
+    if (isRoad(x, y)) return;
+    decorations.push({ x, y, type, size: size || 1 });
+  }
 
   function buildDecorations() {
     decorations = [];
@@ -1102,19 +1241,21 @@
     for (const [type, weight] of theme.deco) {
       for (let i = 0; i < weight; i++) table.push(type);
     }
-    for (let i = 4; i < N_WP; i += 6) {
-      if (rnd() < 0.45) continue;
+    for (let i = 26; i < N_WP - 14; i += 4) {
+      if (rnd() < 0.35) continue;
       const type = table[(rnd() * table.length) | 0];
       const big = DECO[type].w >= 90;
-      const w = wps[i];
-      const rx = -w.ty, ry = w.tx;
       const side = rnd() < 0.5 ? -1 : 1;
-      const lat = side * (ROADW / 2 + 34 + (big ? 30 : 0) + rnd() * 55);
-      const x = w.x + rx * lat;
-      const y = w.y + ry * lat;
-      if (x < 30 || y < 30 || x > TEX - 30 || y > TEX - 30) continue;
-      if (isRoad(x, y)) continue;
-      decorations.push({ x, y, type, size: 0.85 + rnd() * 0.45 });
+      // 25%は遠めの2列目に置いて奥行きを出す
+      const lat = side * (ROADW / 2 + 34 + (big ? 30 : 0) + rnd() * 55 + (rnd() < 0.25 ? 100 : 0));
+      placeDeco(i, lat, type, 0.85 + rnd() * 0.45);
+    }
+    // スタート地点: 観客席とのぼり旗の列でにぎやかに
+    placeDeco(8, ROADW / 2 + 105, 'grandstand', 1.05);
+    placeDeco(18, -(ROADW / 2 + 105), 'grandstand', 1);
+    for (let j = -12; j <= 16; j += 4) {
+      const side = (j / 4) % 2 ? 1 : -1;
+      placeDeco(j, side * (ROADW / 2 + 32), 'nobori', 0.9 + rnd() * 0.2);
     }
   }
 
@@ -1628,8 +1769,18 @@
       const dist = dx * dx + dy * dy;
       if (dist < bestD) { bestD = dist; best = i; }
     }
-    // 追跡を見失ったら全周を再探索して復帰（順位計算が壊れないように）
-    if (bestD > 90 * 90) {
+    // 道幅が広いと路肩で距離が出るので、まず近傍±40を広めに探索
+    const edge = ROADW * 0.5 + 40;
+    if (bestD > edge * edge) {
+      for (let d = -40; d <= 40; d++) {
+        const i = (k.wp + d + N_WP) % N_WP;
+        const dx = wps[i].x - k.x, dy = wps[i].y - k.y;
+        const dist = dx * dx + dy * dy;
+        if (dist < bestD) { bestD = dist; best = i; }
+      }
+    }
+    // それでも遠い＝本当に見失った。全周を再探索して復帰
+    if (bestD > 260 * 260) {
       for (let i = 0; i < N_WP; i++) {
         const dx = wps[i].x - k.x, dy = wps[i].y - k.y;
         const dist = dx * dx + dy * dy;
@@ -1870,20 +2021,33 @@
         if (bn.id) netSend({ t: 'banana', x: bn.x, y: bn.y, id: bn.id });
       }
     } else if (item === 'snowball') {
-      // 前方にまっすぐ飛ぶ雪玉。当たるとスピン
-      const sp = Math.max(k.speed, 0) + 360;
+      // まっすぐ飛ぶ雪玉。当たるとスピン。
+      // ↓（ブレーキ/バック）を押しながら使うと後ろに投げる
+      let back = false;
+      if (k.isPlayer) {
+        back = input.down;
+      } else {
+        // CPUはすぐ後ろにライバルがいるときだけ後ろに投げる
+        back = karts.some((o) => {
+          if (o === k || o.finished) return false;
+          const gap = progressOf(k) - progressOf(o);
+          return gap > 0 && gap < 16;
+        });
+      }
+      const dir = back ? -1 : 1;
+      const sp = (back ? 0 : Math.max(k.speed, 0)) + 360;
       const s = {
-        x: k.x + Math.cos(k.a) * 34,
-        y: k.y + Math.sin(k.a) * 34,
-        vx: Math.cos(k.a) * sp,
-        vy: Math.sin(k.a) * sp,
+        x: k.x + Math.cos(k.a) * 34 * dir,
+        y: k.y + Math.sin(k.a) * 34 * dir,
+        vx: Math.cos(k.a) * sp * dir,
+        vy: Math.sin(k.a) * sp * dir,
         life: 2.5,
         owner: k,
         id: k.isPlayer && vsMode ? `${netRole}-s${++netBananaSeq}` : null,
       };
       shots.push(s);
       if (k.isPlayer) {
-        beep(520, 0.12, 0.12, 'triangle');
+        beep(back ? 420 : 520, 0.12, 0.12, 'triangle');
         if (s.id) netSend({ t: 'shot', x: s.x, y: s.y, vx: s.vx, vy: s.vy, id: s.id });
       }
     } else if (item === 'shield') {
