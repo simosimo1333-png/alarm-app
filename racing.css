@@ -286,6 +286,7 @@ h1 {
 }
 
 /* ---- ふたりで対戦 ---- */
+#gp-btn,
 #vs-btn {
   padding: 8px 20px;
   border-radius: 10px;

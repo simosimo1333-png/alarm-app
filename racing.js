@@ -65,6 +65,7 @@
         [1260, 1130], [1040, 1290], [760, 1230], [520, 1300], [260, 1240],
         [140, 1010], [210, 770], [120, 520], [230, 290], [460, 160],
       ],
+      elev: [[0, 0], [0.15, 0], [0.32, 36], [0.45, 36], [0.6, 8], [0.8, 0]],
       theme: {
         grassA: '#2e7d32', grassB: '#276b2b',
         road: '#5b5b66', curbA: '#d32f2f', curbB: '#f5f5f5',
@@ -89,6 +90,7 @@
         [560, 1250], [200, 1280], [130, 1040], [330, 930], [310, 700],
         [140, 600], [150, 360], [180, 170],
       ],
+      elev: [[0, 0], [0.18, 0], [0.27, 16], [0.34, 0], [0.52, 0], [0.66, 34], [0.78, 34], [0.9, 0]],
       theme: {
         grassA: '#9c8a72', grassB: '#92805f',
         road: '#45454d', curbA: '#b71c1c', curbB: '#eeeeee',
@@ -114,6 +116,7 @@
         [150, 1010], [260, 820], [430, 700], [330, 540], [150, 430],
         [170, 250], [300, 180],
       ],
+      elev: [[0, 0], [0.2, 0], [0.42, 28], [0.58, 28], [0.78, 0]],
       theme: {
         grassA: '#f2f6f7', grassB: '#e3ecef',
         road: '#62707c', curbA: '#1565c0', curbB: '#ffffff',
@@ -138,6 +141,7 @@
         [170, 1280], [120, 1020], [300, 860], [160, 640], [130, 400],
         [260, 160],
       ],
+      elev: [[0, 0], [0.1, 0], [0.4, 90], [0.55, 90], [0.88, 0]],
       theme: {
         grassA: '#6b7d62', grassB: '#5f7057',
         road: '#4c5258', curbA: '#f9a825', curbB: '#ffffff',
@@ -163,6 +167,7 @@
         [300, 760], [170, 580], [820, 520],
         [180, 160],
       ],
+      elev: [[0, 0], [0.12, 0], [0.35, 0], [0.5, 12], [0.82, 78], [0.86, 78], [0.97, 0]],
       theme: {
         grassA: '#4f7a2e', grassB: '#456c28',
         road: '#50565e', curbA: '#ef6c00', curbB: '#ffffff',
@@ -1326,7 +1331,7 @@
   }
 
   // 坂のプロファイル（登り下りで地平線が上下する）
-  // 本物の3D地形: なだらかな丘のヘイトフィールド
+  // 本物の3D地形: コース外のなだらかな丘（コースから離れた場所のみ）
   let hills3d = [];
   function buildTerrain() {
     hills3d = [];
@@ -1334,13 +1339,13 @@
       hills3d.push({
         x: 160 + rnd() * (TEX - 320),
         z: 160 + rnd() * (TEX - 320),
-        amp: (rnd() * 1.7 - 0.6) * 52,
+        amp: (rnd() * 1.5 - 0.5) * 34,
         r: 300 + rnd() * 380,
       });
     }
   }
 
-  function heightAt(x, z) {
+  function wildAt(x, z) {
     let h = 0;
     for (const b of hills3d) {
       const d2 = ((x - b.x) ** 2 + (z - b.z) ** 2) / (b.r * b.r);
@@ -1349,11 +1354,77 @@
         h += b.amp * t * t;
       }
     }
-    // 周囲の平地となめらかにつながるよう、端では0へ
-    const m = 130;
-    const e = Math.min(x, TEX - x, z, TEX - z);
-    if (e < m) h *= Math.max(0, e / m);
     return h;
+  }
+
+  // コースの標高プロファイル（コースごとに定義。平坦区間と長い登り/下りで構成）
+  let trackH = [];
+  function buildTrackProfile() {
+    const elev = course.elev || [[0, 0]];
+    trackH = [];
+    for (let i = 0; i < N_WP; i++) {
+      const f = i / N_WP;
+      let a = elev[elev.length - 1], fa = a[0] - 1, b = elev[0], fb = b[0] + (elev[0][0] > 0 ? 0 : 1);
+      for (let j = 0; j < elev.length; j++) {
+        const cur = elev[j];
+        const nxt = j + 1 < elev.length ? elev[j + 1] : elev[0];
+        const f2 = j + 1 < elev.length ? nxt[0] : nxt[0] + 1;
+        if (f >= cur[0] && f < f2) { a = cur; fa = cur[0]; b = nxt; fb = f2; break; }
+      }
+      const t = Math.max(0, Math.min(1, (f - fa) / Math.max(0.0001, fb - fa)));
+      const s = 0.5 - 0.5 * Math.cos(t * Math.PI); // なめらかな坂
+      trackH.push(a[1] + (b[1] - a[1]) * s);
+    }
+  }
+
+  // 高さグリッド: コース近傍は「コースの標高」で平坦にし、視界をふさがない。
+  // 離れるにつれて荒野の丘へブレンドする
+  const HG = 128;
+  let hGrid = null;
+  function buildHeightGrid() {
+    hGrid = new Float32Array((HG + 1) * (HG + 1));
+    const corridor = ROADW * 0.5 + 70;
+    const blendW = 260;
+    for (let j = 0; j <= HG; j++) {
+      for (let i = 0; i <= HG; i++) {
+        const x = (i / HG) * TEX, z = (j / HG) * TEX;
+        let bd = Infinity, bw = 0;
+        for (let w = 0; w < N_WP; w += 2) {
+          const dx = wps[w].x - x, dz = wps[w].y - z;
+          const d = dx * dx + dz * dz;
+          if (d < bd) { bd = d; bw = w; }
+        }
+        const dist = Math.sqrt(bd);
+        const th = trackH[bw];
+        let h;
+        if (dist < corridor) {
+          h = th;
+        } else if (dist < corridor + blendW) {
+          const t = (dist - corridor) / blendW;
+          const s = t * t * (3 - 2 * t);
+          h = th * (1 - s) + wildAt(x, z) * s;
+        } else {
+          h = wildAt(x, z);
+        }
+        // ワールドの端は0へ
+        const m = 130;
+        const e = Math.min(x, TEX - x, z, TEX - z);
+        if (e < m) h *= Math.max(0, e / m);
+        hGrid[j * (HG + 1) + i] = h;
+      }
+    }
+  }
+
+  function heightAt(x, z) {
+    if (!hGrid) return 0;
+    const fx = Math.max(0, Math.min(HG - 0.001, (x / TEX) * HG));
+    const fz = Math.max(0, Math.min(HG - 0.001, (z / TEX) * HG));
+    const i = fx | 0, j = fz | 0;
+    const tx = fx - i, tz = fz - j;
+    const r = j * (HG + 1);
+    const h00 = hGrid[r + i], h10 = hGrid[r + i + 1];
+    const h01 = hGrid[r + HG + 1 + i], h11 = hGrid[r + HG + 2 + i];
+    return (h00 * (1 - tx) + h10 * tx) * (1 - tz) + (h01 * (1 - tx) + h11 * tx) * tz;
   }
 
   function buildHills() {
@@ -1406,6 +1477,8 @@
     srand(courseSeed);
     buildTrack(course.ctrl);
     buildTerrain();
+    buildTrackProfile();
+    buildHeightGrid();
     buildHills();
     buildPads();
     buildTexture();
@@ -2825,18 +2898,69 @@
     setTimeout(showResults, 1800);
   }
 
+  // ===== グランプリ（全コース連戦・合計ポイント制） =====
+  let gpMode = false;
+  let gpRound = 0;
+  let gpPhase = null;      // null | 'final'
+  let gpPoints = {};       // キー: '@p'(自分) or CPU名
+  let gpAwarded = false;
+  const GP_PTS = [10, 6, 3, 1];
+  const gpKey = (k) => (k.isPlayer ? '@p' : k.name);
+
   function showResults() {
     msgEl.textContent = '';
     const { rank, sorted } = rankOf(player);
-    panelTitle.textContent = rank === 1 ? '🏆 優勝！' : `${rank}位でゴール！`;
-    panelText.innerHTML = `${course.name}<br>タイム: ${fmtTime(playerFinishTime)}`;
     const medals = ['🥇', '🥈', '🥉', '4.'];
-    resultsEl.innerHTML = sorted
-      .map((k, i) => `<div class="${k.isPlayer ? 'me' : ''}">${medals[i]} ${k.name}</div>`)
-      .join('');
+    if (gpMode) {
+      if (!gpAwarded) {
+        gpAwarded = true;
+        sorted.forEach((k, i) => {
+          gpPoints[gpKey(k)] = (gpPoints[gpKey(k)] || 0) + (GP_PTS[i] || 0);
+        });
+      }
+      panelTitle.textContent = `第${gpRound + 1}戦 ${rank === 1 ? '🏆 1位！' : rank + '位'}`;
+      panelText.innerHTML = `${course.name}（${gpRound + 1}/${COURSES.length}）<br>タイム: ${fmtTime(playerFinishTime)}`;
+      resultsEl.innerHTML = sorted
+        .map((k, i) => `<div class="${k.isPlayer ? 'me' : ''}">${medals[i]} ${k.name} ― ${gpPoints[gpKey(k)] || 0}pt</div>`)
+        .join('');
+      startBtn.textContent = gpRound < COURSES.length - 1 ? 'つぎのコースへ →' : 'グランプリ結果へ 🏆';
+    } else {
+      panelTitle.textContent = rank === 1 ? '🏆 優勝！' : `${rank}位でゴール！`;
+      panelText.innerHTML = `${course.name}<br>タイム: ${fmtTime(playerFinishTime)}`;
+      resultsEl.innerHTML = sorted
+        .map((k, i) => `<div class="${k.isPlayer ? 'me' : ''}">${medals[i]} ${k.name}</div>`)
+        .join('');
+      startBtn.textContent = 'もう一度！';
+    }
     resultsEl.classList.remove('hidden');
-    startBtn.textContent = 'もう一度！';
     panel.classList.remove('hidden');
+  }
+
+  function showGPFinal() {
+    gpPhase = 'final';
+    const entries = Object.entries(gpPoints).sort((a, b) => b[1] - a[1]);
+    const rank = entries.findIndex(([key]) => key === '@p') + 1;
+    panelTitle.textContent = rank === 1 ? '🏆 グランプリ優勝！' : `グランプリ ${rank}位`;
+    panelText.innerHTML = `全${COURSES.length}コースの合計ポイント`;
+    resultsEl.innerHTML = entries
+      .map(([key, p], i) => `<div class="${key === '@p' ? 'me' : ''}">${['🥇', '🥈', '🥉', '4.'][i]} ${key === '@p' ? player.name : key} ― ${p}pt</div>`)
+      .join('');
+    startBtn.textContent = 'タイトルへ';
+    beep(660, 0.15, 0.12, 'square');
+    setTimeout(() => beep(880, 0.15, 0.12, 'square'), 150);
+    setTimeout(() => beep(1108, 0.35, 0.12, 'square'), 300);
+    buzz([60, 60, 60, 60, 120]);
+  }
+
+  function exitGP() {
+    gpMode = false;
+    gpPhase = null;
+    courseSelEl.classList.remove('hidden');
+    document.getElementById('vs-area').classList.remove('hidden');
+    gpBtn.classList.remove('hidden');
+    state = 'title';
+    hud.classList.add('hidden');
+    selectCourse(0);
   }
 
   function startRace() {
@@ -2844,12 +2968,36 @@
     if (actx && actx.state === 'suspended') actx.resume();
     leaveNet();
     resetRace(false);
+    gpAwarded = false;
     panel.classList.add('hidden');
     hud.classList.remove('hidden');
     state = 'count';
     countT = 3.5;
   }
-  startBtn.addEventListener('click', startRace);
+
+  function onStartClick() {
+    if (!gpMode) { startRace(); return; }
+    if (gpPhase === 'final') { exitGP(); return; }
+    gpRound++;
+    if (gpRound >= COURSES.length) { showGPFinal(); return; }
+    selectCourse(gpRound);
+    startRace();
+  }
+  startBtn.addEventListener('click', onStartClick);
+
+  const gpBtn = document.getElementById('gp-btn');
+  gpBtn.addEventListener('click', () => {
+    initAudio();
+    gpMode = true;
+    gpPhase = null;
+    gpRound = 0;
+    gpPoints = {};
+    courseSelEl.classList.add('hidden');
+    document.getElementById('vs-area').classList.add('hidden');
+    gpBtn.classList.add('hidden');
+    selectCourse(0);
+    startRace();
+  });
 
   // ===== ふたりで対戦（ルームコードでP2P接続） =====
   // 通常は PeerJS（WebRTC）。?local=1 で同一ブラウザのタブ同士
@@ -3168,6 +3316,6 @@
     rank: () => rankOf(player).rank,
     give: (t) => { if (player) player.item = t; },
     texURL: () => texCanvas.toDataURL(),
-    isDirt, isRoad,
+    isDirt, isRoad, heightAt,
   };
 })();
