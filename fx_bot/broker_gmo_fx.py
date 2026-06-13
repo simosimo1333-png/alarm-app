@@ -214,6 +214,17 @@ class GmoFxBroker:
             body["size"] = str(size)
         return self._private_post("/v1/closeOrder", body)
 
+    def get_latest_executions(self, symbol: str, count: int = 20) -> List[Dict[str, Any]]:
+        """最新の約定一覧を取得する（約定価格の確認に使用）。"""
+        data = self._private_get(
+            "/v1/latestExecutions", params={"symbol": symbol, "count": count}
+        )
+        if isinstance(data, dict):
+            return data.get("list", [])
+        if isinstance(data, list):
+            return data
+        return []
+
     # ------------------------------------------------------------------ #
     # 補助
     # ------------------------------------------------------------------ #

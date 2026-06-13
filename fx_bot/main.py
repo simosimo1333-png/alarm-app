@@ -233,10 +233,20 @@ class TradingBot:
             self._fail_stop(f"新規注文エラー: {e}")
             return
 
-        position_id = self._extract_position_id(result)
-        self._open_local_position(signal.value, entry_price, size, position_id)
+        # 約定後に実建玉（positionId・約定価格）を照会して同期する。
+        # 確認できない場合は建玉の所在が不明なため安全停止して手動確認を促す。
+        if not self.reconcile_after_entry(signal, entry_price):
+            self._open_local_position(signal.value, entry_price, size, None)
+            self.risk.record_entry(signal.value)
+            self._fail_stop(
+                "発注は送信したが建玉を確認できませんでした。取引所画面で建玉状況を確認してください。"
+            )
+            return
         self.risk.record_entry(signal.value)
-        self.notifier.notify("新規注文", plan)
+        self.notifier.notify(
+            "新規注文",
+            f"{plan}\n約定建玉: id={self.position.position_id} 価格={self.position.entry_price:.3f}",
+        )
 
     def _open_local_position(self, side: str, price: float, size: int, position_id) -> None:
         self.position = PositionState(
@@ -245,13 +255,97 @@ class TradingBot:
         )
 
     @staticmethod
-    def _extract_position_id(result) -> str | None:
-        # 応答仕様に応じて建玉IDを抽出（成行は約定後に建玉が立つため後続照会が必要な場合あり）
-        if isinstance(result, dict):
-            for k in ("positionId", "rootOrderId", "orderId"):
-                if k in result:
-                    return str(result[k])
-        return None
+    def _position_from_api(item: dict) -> PositionState:
+        """openPositions のレスポンス項目から PositionState を構築する。"""
+        def _f(*keys, default=0.0):
+            for k in keys:
+                if k in item and item[k] not in (None, ""):
+                    try:
+                        return float(item[k])
+                    except (TypeError, ValueError):
+                        continue
+            return default
+        return PositionState(
+            side=str(item.get("side")) if item.get("side") else None,
+            entry_price=_f("price", "entryPrice"),
+            size=int(_f("size")),
+            position_id=str(item["positionId"]) if item.get("positionId") else None,
+            opened_at=datetime.now(timezone.utc),
+        )
+
+    def reconcile_after_entry(self, signal: Signal, fallback_price: float) -> bool:
+        """
+        本番発注の直後に実建玉を照会し、positionId と約定価格を self.position に反映する。
+        数回リトライしても建玉を確認できなければ False を返す（呼び出し側で安全停止）。
+        """
+        for attempt in range(5):
+            try:
+                positions = self.broker.get_open_positions(self.cfg.symbol)
+            except BrokerError as e:
+                logger.warning("建玉照会リトライ(%d): %s", attempt + 1, e)
+                time.sleep(1.0)
+                continue
+            same_side = [p for p in positions if str(p.get("side")) == signal.value]
+            if same_side:
+                # 最新（positionId 最大、なければ末尾）の建玉を採用
+                try:
+                    chosen = max(same_side, key=lambda p: int(p.get("positionId", 0)))
+                except (TypeError, ValueError):
+                    chosen = same_side[-1]
+                self.position = self._position_from_api(chosen)
+                logger.info(
+                    "建玉を同期: id=%s side=%s price=%.3f size=%d",
+                    self.position.position_id, self.position.side,
+                    self.position.entry_price, self.position.size,
+                )
+                return True
+            time.sleep(1.0)
+        logger.error("約定後の建玉を確認できませんでした（fallback価格=%.3f）。", fallback_price)
+        return False
+
+    def adopt_existing_positions(self) -> None:
+        """本番起動時、既存建玉があればボットが引き継いで SL/TP 管理する。"""
+        try:
+            positions = self.broker.get_open_positions(self.cfg.symbol)
+        except BrokerError as e:
+            self._fail_stop(f"起動時の建玉照会でAPIエラー: {e}")
+            return
+        if not positions:
+            logger.info("既存建玉なし。フラットな状態から開始します。")
+            return
+        chosen = positions[0]
+        self.position = self._position_from_api(chosen)
+        self.risk.record_entry(self.position.side or "")
+        logger.warning(
+            "既存建玉を引き継ぎます: id=%s side=%s price=%.3f size=%d "
+            "（このボットの SL/TP 管理下に置きます）",
+            self.position.position_id, self.position.side,
+            self.position.entry_price, self.position.size,
+        )
+        self.notifier.notify(
+            "建玉引き継ぎ",
+            f"既存{self.position.side}建玉(size={self.position.size})を管理下に置きました。",
+        )
+
+    def preflight_live(self) -> bool:
+        """本番起動前に Private API への接続・認証を1回検証する。"""
+        try:
+            assets = self.broker.get_assets()
+            margin = self.broker.get_margin_ratio()
+            self.broker.get_active_orders(self.cfg.symbol)
+        except BrokerError as e:
+            self._fail_stop(f"本番プリフライト失敗（認証/接続）: {e}")
+            return False
+        logger.info(
+            "本番プリフライトOK: 証拠金維持率=%s%% 資産=%s",
+            margin, assets.get("equity") or assets.get("balance") or "?",
+        )
+        if margin is not None and not self.risk.margin_ok(margin):
+            self._fail_stop(
+                f"起動時の証拠金維持率({margin}%)が下限({self.cfg.min_margin_ratio}%)未満。"
+            )
+            return False
+        return True
 
     # ---------------------------------------------------------------- #
     def _fail_stop(self, reason: str) -> None:
@@ -262,6 +356,15 @@ class TradingBot:
     def run(self) -> None:
         if not self.startup_checks():
             sys.exit(1)
+
+        # 本番モードは取引開始前に接続/認証を検証し、既存建玉を引き継ぐ。
+        if not self.cfg.dry_run:
+            if not self.preflight_live():
+                sys.exit(1)
+            self.adopt_existing_positions()
+            if self.risk.halted:
+                sys.exit(1)
+
         self.maybe_start_websocket()
 
         global _shutdown
