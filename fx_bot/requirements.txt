@@ -1,0 +1,5 @@
+requests>=2.31.0
+# WebSocket 機能（USE_WEBSOCKET=true）を使う場合のみ必要
+websocket-client>=1.7.0
+# .env を使う場合（任意）。main は環境変数を直接読むため必須ではない
+python-dotenv>=1.0.0
