@@ -1006,29 +1006,35 @@
     return c;
   }
 
-  function makeNoboriSprite() {
-    // のぼり旗（祭の応援）
+  // のぼり旗（風になびくアニメーション。phaseで波の位相を変える）
+  function makeNoboriFrame(phase) {
     const c = document.createElement('canvas');
-    c.width = 36;
+    c.width = 40;
     c.height = 92;
     const g = c.getContext('2d');
     // 竿
     g.fillStyle = '#8d6e63';
     g.fillRect(4, 2, 4, 90);
     g.fillRect(4, 4, 28, 3);
-    // 旗（朱地に白文字）
-    g.fillStyle = '#d23a2e';
-    g.fillRect(10, 8, 22, 62);
-    g.strokeStyle = 'rgba(255,255,255,0.85)';
-    g.lineWidth = 2;
-    g.strokeRect(11, 9, 20, 60);
+    // 旗を横ストリップに分け、各高さで横にずらして布のうねりを出す
+    const x0 = 10, w = 22, top = 8, h = 62;
+    for (let y = 0; y < h; y += 2) {
+      const sway = Math.sin(y * 0.13 + phase) * 4 * (y / h); // 下ほど大きく揺れる
+      g.fillStyle = '#d23a2e';
+      g.fillRect(x0 + sway, top + y, w, 2);
+    }
+    // 白い縁取りと文字（中央列の揺れに合わせる）
+    const mid = Math.sin(31 * 0.13 + phase) * 4 * 0.5;
     g.fillStyle = '#fff';
     g.font = 'bold 15px serif';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText('祭', 21, 26);
-    g.fillText('り', 21, 48);
+    g.fillText('祭', x0 + w / 2 + mid, top + 18);
+    g.fillText('り', x0 + w / 2 + mid, top + 40);
     return c;
+  }
+  function makeNoboriFrames(n) {
+    return Array.from({ length: n }, (_, i) => makeNoboriFrame((i / n) * Math.PI * 2));
   }
 
   function makeFlowerSprite() {
@@ -1133,16 +1139,14 @@
     return c;
   }
 
-  function makeWaterfallSprite() {
-    // 滝のある断崖（飛騨の渓谷）
+  // 滝のある断崖（水流が流れ落ちるアニメーション。phaseで流れ位置をずらす）
+  function makeWaterfallFrame(phase) {
     const c = document.createElement('canvas');
     c.width = 150; c.height = 200;
     const g = c.getContext('2d');
     // 岩壁
     g.fillStyle = '#6b6258';
-    g.beginPath();
-    g.moveTo(0, 0); g.lineTo(150, 0); g.lineTo(150, 200); g.lineTo(0, 200);
-    g.closePath(); g.fill();
+    g.fillRect(0, 0, 150, 200);
     g.fillStyle = 'rgba(0,0,0,0.18)';
     for (let i = 0; i < 14; i++) {
       g.fillRect((i * 53) % 150, (i * 71) % 200, 18 + (i % 3) * 10, 6);
@@ -1154,25 +1158,31 @@
     for (let x = -10; x < 150; x += 26) {
       g.beginPath(); g.arc(x, 18, 18, 0, Math.PI * 2); g.fill();
     }
-    // 滝（白い帯×2）
-    for (const fx of [54, 92]) {
-      const wg = g.createLinearGradient(fx, 24, fx, 200);
-      wg.addColorStop(0, '#ffffff');
-      wg.addColorStop(0.5, '#dbeefc');
-      wg.addColorStop(1, '#a-cce4'.replace('-', 'b'));
+    // 滝（白い帯×2）と、流れ落ちる横線（位相でスクロール）
+    for (const fx of [50, 90]) {
       g.fillStyle = '#dff0fb';
-      g.fillRect(fx, 24, 16, 176);
-      g.fillStyle = 'rgba(255,255,255,0.85)';
-      g.fillRect(fx + 3, 24, 5, 176);
+      g.fillRect(fx, 24, 18, 176);
+      g.fillStyle = 'rgba(255,255,255,0.9)';
+      g.fillRect(fx + 4, 24, 6, 176);
+      // 流れの筋（下へ流れるアニメ）
+      g.fillStyle = 'rgba(150,190,225,0.65)';
+      for (let y = 0; y < 176; y += 16) {
+        const yy = 24 + ((y + phase * 16) % 176);
+        g.fillRect(fx + 1, yy, 16, 5);
+      }
     }
-    // 滝壺のしぶき
-    g.fillStyle = 'rgba(255,255,255,0.8)';
-    for (let i = 0; i < 16; i++) {
+    // 滝壺のしぶき（位相でゆらぐ）
+    g.fillStyle = 'rgba(255,255,255,0.85)';
+    for (let i = 0; i < 18; i++) {
+      const r = 2 + ((i + phase * 3) % 4);
       g.beginPath();
-      g.arc(50 + (i * 37) % 60, 188 + (i * 13) % 12, 3 + (i % 3), 0, Math.PI * 2);
+      g.arc(46 + (i * 37) % 70, 186 + (i * 13 + phase * 5) % 12, r, 0, Math.PI * 2);
       g.fill();
     }
     return c;
+  }
+  function makeWaterfallFrames(n) {
+    return Array.from({ length: n }, (_, i) => makeWaterfallFrame(i));
   }
 
   function makePeakShrineSprite() {
@@ -1430,7 +1440,7 @@
     yatai:    { img: makeYataiSprite(), w: 60 },
     nakabashi:{ img: makeNakabashiSprite(), w: 106 },
     castle:   { img: makeCastleSprite(), w: 360 },
-    waterfall:{ img: makeWaterfallSprite(), w: 300 },
+    waterfall:{ frames: makeWaterfallFrames(4), fps: 10, w: 300 },
     peakshrine:{ img: makePeakShrineSprite(), w: 460 },
     sarubobo: { img: makeSaruboboSprite(), w: 42 },
     dango:    { img: makeDangoSprite(), w: 66 },
@@ -1438,7 +1448,7 @@
     onsen:    { img: makeOnsenSprite(), w: 36 },
     rock:     { img: makeRockSprite(), w: 50 },
     grandstand: { img: makeGrandstandSprite(), w: 150 },
-    nobori:   { img: makeNoboriSprite(), w: 30 },
+    nobori:   { frames: makeNoboriFrames(4), fps: 8, w: 30 },
     flower:   { img: makeFlowerSprite(), w: 40 },
     waterwheel: { img: makeWaterwheelSprite(), w: 88 },
     cow:      { img: makeEmojiSprite('🐄'), w: 26 },
@@ -1754,9 +1764,11 @@
       glDecos = decorations.map((d) => {
         const spec = DECO[d.type];
         const w = spec.w * d.size;
+        const base = spec.img || spec.frames[0];
         return {
           x: d.x, z: d.y, y0: heightAt(d.x, d.y),
-          canvas: spec.img, w, h: w * spec.img.height / spec.img.width,
+          canvas: spec.img, frames: spec.frames, fps: spec.fps || 8,
+          w, h: w * base.height / base.width,
         };
       });
     }
@@ -2048,10 +2060,11 @@
   }
 
   const CPU_DEFS = [
-    { name: 'レッド', body: '#e53935', helmet: '#ffeb3b', skill: 0.97 },
-    { name: 'ブルー', body: '#1e88e5', helmet: '#fff',    skill: 0.93 },
-    { name: 'グリーン', body: '#43a047', helmet: '#ff9800', skill: 0.89 },
+    { name: 'レッド', body: '#e53935', helmet: '#ffeb3b', fur: '#d9863f', skill: 0.97 }, // 柴犬風
+    { name: 'ブルー', body: '#1e88e5', helmet: '#fff',    fur: '#c7d2da', skill: 0.93 }, // 灰猫
+    { name: 'グリーン', body: '#43a047', helmet: '#ff9800', fur: '#8a9a5b', skill: 0.89 }, // カエル風
   ];
+  const PLAYER_FUR = '#e8923c'; // オレンジの猫（マスコット）
 
   function spawnKart(def, wpIdx, lateral, isPlayer) {
     const w = wps[wpIdx];
@@ -2064,6 +2077,7 @@
       color: def.body,
       bodyC: def.body,
       helmetC: def.helmet || '#ffffff',
+      furC: def.fur || (isPlayer ? PLAYER_FUR : '#d9863f'),
       skill: def.skill || 1,
       x: w.x + rx * lateral,
       y: w.y + ry * lateral,
@@ -2108,14 +2122,14 @@
       const myLat = netRole === 'host' ? -22 : 22;
       remoteKart = spawnKart({ name: remoteName || 'あいて', body: '#1e88e5', helmet: '#fff' }, grid, -myLat, false);
       remoteKart.remote = true;
-      player = spawnKart({ name: getPlayerName(), body: '#e94560', helmet: '#fff' }, grid, myLat, true);
+      player = spawnKart({ name: getPlayerName(), body: '#e94560', helmet: '#fff', fur: PLAYER_FUR }, grid, myLat, true);
       karts.push(remoteKart, player);
     } else {
       remoteKart = null;
       karts.push(spawnKart(CPU_DEFS[0], grid + 4, -22, false));
       karts.push(spawnKart(CPU_DEFS[1], grid + 4, 22, false));
       karts.push(spawnKart(CPU_DEFS[2], grid, -22, false));
-      player = spawnKart({ name: getPlayerName(), body: '#e94560', helmet: '#fff' }, grid, 22, true);
+      player = spawnKart({ name: getPlayerName(), body: '#e94560', helmet: '#fff', fur: PLAYER_FUR }, grid, 22, true);
       karts.push(player);
     }
 
@@ -3083,7 +3097,7 @@
         lift: k.alt,
         glide: k.glide && k.alt > 0,
         roll: k.isPlayer ? steerSmooth * 0.13 : 0,
-        body: k.bodyC, helmet: k.helmetC,
+        body: k.bodyC, helmet: k.helmetC, fur: k.furC,
         boost: k.boost, shield: k.shield,
         label: !k.isPlayer ? k.label : null,
         icon: k.spin > 0 && k.crashIcon && CRASH_FX[k.crashIcon]
@@ -3115,7 +3129,7 @@
       bloomCtx.drawImage(gl3dCanvas, 0, 0, bloomCv.width, bloomCv.height);
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.28;
+      ctx.globalAlpha = 0.2;
       ctx.filter = 'blur(6px)';
       ctx.drawImage(bloomCv, 0, 0, W, H);
       ctx.restore();
