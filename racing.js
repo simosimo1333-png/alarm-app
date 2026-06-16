@@ -83,6 +83,7 @@
           { color: '#5d8aa0', amp: 20, speed: 110 },
         ],
         deco: [['tree', 6], ['cow', 1], ['flower', 2]],
+        landmark: 'waterfall',
         ambient: 'fluff', skyFx: 'balloon',
       },
     },
@@ -111,6 +112,7 @@
           { color: '#7c6b91', amp: 18, speed: 110 },
         ],
         deco: [['machiya', 3], ['sakagura', 2], ['yatai', 1], ['lantern', 1], ['nakabashi', 1], ['sarubobo', 2], ['dango', 1], ['torii', 1], ['nobori', 1]],
+        landmark: 'castle',
         ambient: 'sakura', skyFx: 'fireworks',
         light: { dir: [-0.75, -0.5, 0.2], color: [1, 0.8, 0.63], amb: 0.55 },
       },
@@ -140,6 +142,7 @@
           { color: '#aac4d4', amp: 20, speed: 110, snow: true },
         ],
         deco: [['gassho', 3], ['snowtree', 3], ['snowman', 1], ['waterwheel', 1]],
+        landmark: 'peakshrine',
         ambient: 'snow', skyFx: 'village',
         light: { dir: [-0.4, -0.85, 0.3], color: [0.93, 0.97, 1], amb: 0.74 },
       },
@@ -170,6 +173,7 @@
           { color: '#90a8ba', amp: 26, speed: 110, snow: true },
         ],
         deco: [['rock', 3], ['snowtree', 2], ['goat', 1], ['flower', 1]],
+        landmark: 'peakshrine',
         ambient: 'mist', skyFx: 'birds',
       },
     },
@@ -198,6 +202,7 @@
           { color: '#6d8296', amp: 22, speed: 110 },
         ],
         deco: [['autumn', 3], ['tree', 2], ['onsen', 1], ['flower', 1]],
+        landmark: 'waterfall',
         ambient: 'leaves',
         light: { dir: [-0.55, -0.7, 0.3], color: [1, 0.92, 0.8], amb: 0.6 },
       },
@@ -1090,6 +1095,116 @@
     return c;
   }
 
+  // ===== 遠景の大型ランドマーク（地平線に見えるご当地の名所） =====
+  function makeCastleSprite() {
+    // 高山城（山上の天守）
+    const c = document.createElement('canvas');
+    c.width = 200; c.height = 220;
+    const g = c.getContext('2d');
+    // 山
+    g.fillStyle = '#5a6b4a';
+    g.beginPath();
+    g.moveTo(0, 220); g.lineTo(100, 96); g.lineTo(200, 220);
+    g.closePath(); g.fill();
+    g.fillStyle = '#6c7e57';
+    g.beginPath();
+    g.moveTo(40, 220); g.lineTo(100, 120); g.lineTo(160, 220);
+    g.closePath(); g.fill();
+    // 石垣
+    g.fillStyle = '#9c948a';
+    g.beginPath();
+    g.moveTo(72, 150); g.lineTo(128, 150); g.lineTo(138, 178); g.lineTo(62, 178);
+    g.closePath(); g.fill();
+    // 天守（3層）
+    const tiers = [[80, 120, 40, 18], [84, 104, 32, 16], [89, 90, 22, 14]];
+    for (const [x, y, w, h] of tiers) {
+      g.fillStyle = '#efeae0';
+      g.fillRect(x, y, w, h);
+      // 屋根（黒瓦・反り）
+      g.fillStyle = '#3a4750';
+      g.beginPath();
+      g.moveTo(x - 7, y); g.quadraticCurveTo(x + w / 2, y - 13, x + w + 7, y);
+      g.quadraticCurveTo(x + w / 2, y - 3, x - 7, y);
+      g.closePath(); g.fill();
+    }
+    // 金の鯱
+    g.fillStyle = '#e8c84a';
+    g.fillRect(99, 82, 3, 8);
+    return c;
+  }
+
+  function makeWaterfallSprite() {
+    // 滝のある断崖（飛騨の渓谷）
+    const c = document.createElement('canvas');
+    c.width = 150; c.height = 200;
+    const g = c.getContext('2d');
+    // 岩壁
+    g.fillStyle = '#6b6258';
+    g.beginPath();
+    g.moveTo(0, 0); g.lineTo(150, 0); g.lineTo(150, 200); g.lineTo(0, 200);
+    g.closePath(); g.fill();
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    for (let i = 0; i < 14; i++) {
+      g.fillRect((i * 53) % 150, (i * 71) % 200, 18 + (i % 3) * 10, 6);
+    }
+    // 上部の緑
+    g.fillStyle = '#3f6b35';
+    g.fillRect(0, 0, 150, 26);
+    g.fillStyle = '#4f7d3f';
+    for (let x = -10; x < 150; x += 26) {
+      g.beginPath(); g.arc(x, 18, 18, 0, Math.PI * 2); g.fill();
+    }
+    // 滝（白い帯×2）
+    for (const fx of [54, 92]) {
+      const wg = g.createLinearGradient(fx, 24, fx, 200);
+      wg.addColorStop(0, '#ffffff');
+      wg.addColorStop(0.5, '#dbeefc');
+      wg.addColorStop(1, '#a-cce4'.replace('-', 'b'));
+      g.fillStyle = '#dff0fb';
+      g.fillRect(fx, 24, 16, 176);
+      g.fillStyle = 'rgba(255,255,255,0.85)';
+      g.fillRect(fx + 3, 24, 5, 176);
+    }
+    // 滝壺のしぶき
+    g.fillStyle = 'rgba(255,255,255,0.8)';
+    for (let i = 0; i < 16; i++) {
+      g.beginPath();
+      g.arc(50 + (i * 37) % 60, 188 + (i * 13) % 12, 3 + (i % 3), 0, Math.PI * 2);
+      g.fill();
+    }
+    return c;
+  }
+
+  function makePeakShrineSprite() {
+    // 雪をかぶった霊峰と山頂の祠（乗鞍）
+    const c = document.createElement('canvas');
+    c.width = 220; c.height = 180;
+    const g = c.getContext('2d');
+    g.fillStyle = '#8ea2b4';
+    g.beginPath();
+    g.moveTo(0, 180); g.lineTo(110, 18); g.lineTo(220, 180);
+    g.closePath(); g.fill();
+    // 残雪
+    g.fillStyle = '#f4f8fb';
+    g.beginPath();
+    g.moveTo(110, 18); g.lineTo(74, 82); g.lineTo(92, 78); g.lineTo(104, 96);
+    g.lineTo(120, 74); g.lineTo(136, 86); g.lineTo(110, 18);
+    g.closePath(); g.fill();
+    // 稜線の影
+    g.fillStyle = 'rgba(40,55,75,0.25)';
+    g.beginPath();
+    g.moveTo(110, 18); g.lineTo(220, 180); g.lineTo(150, 180);
+    g.closePath(); g.fill();
+    // 山頂の小さな祠
+    g.fillStyle = '#b23b2e';
+    g.fillRect(104, 12, 12, 8);
+    g.fillStyle = '#2a2420';
+    g.beginPath();
+    g.moveTo(100, 12); g.lineTo(110, 4); g.lineTo(120, 12);
+    g.closePath(); g.fill();
+    return c;
+  }
+
   function makeNakabashiSprite() {
     // 中橋（宮川にかかる朱塗りの欄干）
     const c = document.createElement('canvas');
@@ -1314,6 +1429,9 @@
     sakagura: { img: makeSakaguraSprite(), w: 98 },
     yatai:    { img: makeYataiSprite(), w: 60 },
     nakabashi:{ img: makeNakabashiSprite(), w: 106 },
+    castle:   { img: makeCastleSprite(), w: 360 },
+    waterfall:{ img: makeWaterfallSprite(), w: 300 },
+    peakshrine:{ img: makePeakShrineSprite(), w: 460 },
     sarubobo: { img: makeSaruboboSprite(), w: 42 },
     dango:    { img: makeDangoSprite(), w: 66 },
     torii:    { img: makeToriiSprite(), w: 82 },
@@ -1381,6 +1499,19 @@
         const x = bx * S, y = by * S;
         if (!isRoad(x, y)) decorations.push({ x, y, type: 'nakabashi', size: 0.85 });
       }
+    }
+    // 遠景の大型ランドマーク（コースの内側中央の少し奥に大きく置く）
+    if (course.landmark) {
+      let cx = 0, cy = 0;
+      for (let i = 0; i < N_WP; i += 8) { cx += wps[i].x; cy += wps[i].y; }
+      cx /= (N_WP / 8); cy /= (N_WP / 8); // コースの重心
+      // スタート方向の奥へ寄せる
+      const w0 = wps[Math.floor(N_WP * 0.45)];
+      decorations.push({
+        x: cx * 0.35 + w0.x * 0.65,
+        y: cy * 0.35 + w0.y * 0.65,
+        type: course.landmark, size: 1, landmark: true,
+      });
     }
     // スタート地点: 観客席とのぼり旗の列でにぎやかに
     placeDeco(8, ROADW / 2 + 105, 'grandstand', 1.05);
@@ -1564,6 +1695,34 @@
     }
   }
 
+  // 通り抜けられる鳥居型ゲート。スタート地点と数か所に配置（道幅に追従）
+  let gates = [];
+  function buildGates() {
+    gates = [];
+    // 鳥居の色（コースのテーマ縁石色を使う）
+    const hex = theme.curbA;
+    const col = [parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255];
+    const dark = col.map((v) => v * 0.7);
+    const black = [0.13, 0.11, 0.1];
+    const cream = [0.96, 0.93, 0.85];
+    const span = ROADW / 2 + 14;
+    const H = 78, beam = 2 * span + 34;
+    // 部品: [sx,sy,sz,px,py,pz,[r,g,b]]（px=横方向, pz=進行方向, py=高さ）
+    const parts = [
+      [9, H, 9, -span, H / 2, 0, col],          // 左柱
+      [9, H, 9, span, H / 2, 0, col],           // 右柱
+      [2 * span + 6, 6, 8, 0, H - 16, 0, col],  // 貫（下の横木）
+      [beam, 7, 12, 0, H, 0, col],              // 島木
+      [beam + 8, 6, 15, 0, H + 9, 0, black],    // 笠木（黒・反り風に上に）
+      [16, 12, 5, 0, H - 4, 0, cream],          // 額束
+    ];
+    const at = [0, Math.floor(N_WP * 0.33), Math.floor(N_WP * 0.66)];
+    for (const i of at) {
+      const w = wps[i];
+      gates.push({ x: w.x, y: w.y, a: Math.atan2(w.ty, w.tx), parts });
+    }
+  }
+
   function buildCourse(idx, seed) {
     courseIdx = idx;
     course = COURSES[idx];
@@ -1578,6 +1737,7 @@
     buildHeightGrid();
     buildHills();
     buildPads();
+    buildGates();
     buildTexture();
     buildDecorations();
     buildSky();
@@ -2933,6 +3093,7 @@
       bananas: bananas.map((b) => ({ x: b.x, z: b.y })),
       shots: shots.map((s) => ({ x: s.x, z: s.y })),
       decos: glDecos,
+      gates: gates.map((g) => ({ x: g.x, z: g.y, a: g.a, parts: g.parts })),
       sprites: { star: starSprite, banana: bananaSprite, snowball: snowballSprite },
     });
   }
