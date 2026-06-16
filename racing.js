@@ -39,12 +39,14 @@
   const mmCanvas = document.getElementById('minimap');
   const mmCtx = mmCanvas.getContext('2d');
   const hud = document.getElementById('hud');
-  const hudPos = document.getElementById('hud-pos');
-  const hudName = document.getElementById('hud-name');
+  const hudPosNum = document.querySelector('#hud-pos .num');
+  const hudPosOrd = document.querySelector('#hud-pos .ord');
+  const hudStandings = document.getElementById('hud-standings');
   const hudLap = document.getElementById('hud-lap');
-  const hudTime = document.getElementById('hud-time');
-  const hudSpeed = document.getElementById('hud-speed');
+  const hudTimeV = document.getElementById('hud-time-v');
   const hudItem = document.getElementById('hud-item');
+  const speedoCanvas = document.getElementById('speedo');
+  const spCtx = speedoCanvas.getContext('2d');
   const msgEl = document.getElementById('message');
   const wrongwayEl = document.getElementById('wrongway');
   const panel = document.getElementById('panel');
@@ -1951,7 +1953,6 @@
       player = spawnKart({ name: getPlayerName(), body: '#e94560', helmet: '#fff' }, grid, 22, true);
       karts.push(player);
     }
-    hudName.textContent = player.name;
 
     itemBoxes = [];
     // スタートグリッド付近（終端60wp）には置かない
@@ -2807,18 +2808,31 @@
         ctx.fill();
       }
     }
-    // ブースト中の火花
+    // ブースト中: 加算合成で青コア＋オレンジ火花の派手なジェット
     if (player.boost > 0) {
-      for (let i = 0; i < 7; i++) {
-        ctx.fillStyle = (i & 1) ? 'rgba(255,170,40,0.9)' : 'rgba(255,230,120,0.9)';
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      // 足元の青い光輪
+      const halo = ctx.createRadialGradient(pr.x, pr.y + 14, 0, pr.x, pr.y + 14, 120);
+      halo.addColorStop(0, 'rgba(120,210,255,0.5)');
+      halo.addColorStop(0.5, 'rgba(60,150,255,0.18)');
+      halo.addColorStop(1, 'rgba(60,150,255,0)');
+      ctx.fillStyle = halo;
+      ctx.fillRect(pr.x - 130, pr.y - 70, 260, 200);
+      // 火花
+      for (let i = 0; i < 16; i++) {
+        const c = Math.random();
+        ctx.fillStyle = c < 0.4 ? 'rgba(180,235,255,0.95)'
+          : c < 0.7 ? 'rgba(255,225,120,0.95)' : 'rgba(255,140,40,0.9)';
         ctx.beginPath();
         ctx.arc(
-          pr.x + (Math.random() - 0.5) * 90,
-          pr.y + 6 + Math.random() * 30,
-          2 + Math.random() * 4, 0, Math.PI * 2
+          pr.x + (Math.random() - 0.5) * 130,
+          pr.y + 4 + Math.random() * 46,
+          1.5 + Math.random() * 4.5, 0, Math.PI * 2
         );
         ctx.fill();
       }
+      ctx.restore();
     }
     // クラッシュ原因のテキスト（ふわっと上がって消える）
     if (crashFxT > 0 && crashLabels[crashFxCause]) {
@@ -2830,20 +2844,30 @@
       ctx.drawImage(img, W / 2 - lw / 2, pr.y - 250 - t * 55, lw, lh);
       ctx.globalAlpha = 1;
     }
-    // 最高速付近のスピード線
-    if (Math.abs(player.speed) > MAX_SPEED * 0.9) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
-      ctx.lineWidth = 2;
-      for (let i = 0; i < 8; i++) {
-        const sy = HORIZON + Math.random() * (H - HORIZON);
-        const left = Math.random() < 0.5;
-        const x0 = left ? Math.random() * W * 0.15 : W - Math.random() * W * 0.15;
-        const len = (30 + Math.random() * 70) * (left ? 1 : -1);
+    // 高速時: 画面中心から放射するスピードブラー（疾走感）
+    const sp = Math.abs(player.speed);
+    const thr = MAX_SPEED * (player.boost > 0 ? 0.55 : 0.78);
+    if (sp > thr) {
+      const intensity = Math.min(1, (sp - thr) / (MAX_SPEED * 0.4));
+      const cx = W / 2, cy = H * 0.46;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const n = 10 + (intensity * 18 | 0);
+      for (let i = 0; i < n; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const r0 = W * (0.28 + Math.random() * 0.12);
+        const r1 = r0 + W * (0.1 + Math.random() * 0.22) * (0.5 + intensity);
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        ctx.strokeStyle = player.boost > 0
+          ? `rgba(170,225,255,${0.16 + intensity * 0.2})`
+          : `rgba(255,255,255,${0.1 + intensity * 0.16})`;
+        ctx.lineWidth = 1 + Math.random() * 2;
         ctx.beginPath();
-        ctx.moveTo(x0, sy);
-        ctx.lineTo(x0 + len, sy);
+        ctx.moveTo(cx + ca * r0, cy + sa * r0);
+        ctx.lineTo(cx + ca * r1, cy + sa * r1);
         ctx.stroke();
       }
+      ctx.restore();
     }
   }
 
@@ -2962,16 +2986,81 @@
     return `${m}'${String(s).padStart(2, '0')}"${String(c).padStart(2, '0')}`;
   }
 
+  const ORD = ['', 'st', 'nd', 'rd', 'th'];
+  let standN = 0;
   function updateHud() {
-    const { rank } = rankOf(player);
-    hudPos.textContent = `${rank}位`;
-    hudLap.textContent = `LAP ${Math.min(Math.max(player.lap, 1), LAPS)}/${LAPS}`;
-    hudTime.textContent = fmtTime(raceTime);
-    hudSpeed.textContent = `${Math.max(0, Math.round(player.speed * 0.6))} km/h`;
+    const { rank, sorted } = rankOf(player);
+    hudPosNum.textContent = rank;
+    hudPosOrd.textContent = ORD[Math.min(rank, 4)];
+    hudLap.innerHTML = `LAP <b>${Math.min(Math.max(player.lap, 1), LAPS)}</b><span>/${LAPS}</span>`;
+    hudTimeV.textContent = fmtTime(raceTime);
+
+    // 順位リスト（カート数が変わったら作り直す）
+    if (standN !== sorted.length) {
+      hudStandings.innerHTML = sorted.map(() =>
+        '<li><span class="badge"></span><span class="dot"></span><span class="nm"></span></li>'
+      ).join('');
+      standN = sorted.length;
+    }
+    const rows = hudStandings.children;
+    for (let i = 0; i < sorted.length; i++) {
+      const k = sorted[i], li = rows[i];
+      li.className = (k.isPlayer ? 'me ' : '') + 'r' + (i + 1);
+      li.children[0].textContent = i + 1;
+      li.children[1].style.background = k.color;
+      li.children[2].textContent = k.name;
+    }
+
     const icon = ITEM_ICONS[player.item] || '';
     hudItem.textContent = icon;
+    hudItem.classList.toggle('has', !!icon);
     tcItem.textContent = icon || '🎁';
     tcItem.classList.toggle('has-item', !!icon);
+
+    drawSpeedo(Math.max(0, Math.round(player.speed * 0.6)), player.boost > 0);
+  }
+
+  // 円形スピードメーター（コンソール風のグラデーション・ゲージ）
+  const SPD_MAX = Math.round(MAX_SPEED * BOOST_MUL * 0.6);
+  function drawSpeedo(kmh, boosting) {
+    const g = spCtx, S = speedoCanvas.width, cx = S / 2, cy = S / 2, r = S * 0.4;
+    const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25; // 270度ゲージ
+    g.clearRect(0, 0, S, S);
+    // 台座
+    g.beginPath();
+    g.arc(cx, cy, S * 0.47, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(10,15,30,0.55)';
+    g.fill();
+    // 目盛りの溝
+    g.lineWidth = S * 0.075;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.arc(cx, cy, r, a0, a1);
+    g.strokeStyle = 'rgba(255,255,255,0.14)';
+    g.stroke();
+    // スピードに応じた弧（シアン→黄→赤、ブースト時は白熱）
+    const t = Math.max(0, Math.min(1, kmh / SPD_MAX));
+    const grad = g.createLinearGradient(0, 0, S, S);
+    if (boosting) {
+      grad.addColorStop(0, '#aee9ff'); grad.addColorStop(1, '#fff3b0');
+    } else {
+      grad.addColorStop(0, '#37d0ff'); grad.addColorStop(0.6, '#ffd23e'); grad.addColorStop(1, '#ff5a3c');
+    }
+    g.beginPath();
+    g.arc(cx, cy, r, a0, a0 + (a1 - a0) * t);
+    g.strokeStyle = grad;
+    g.shadowColor = boosting ? 'rgba(170,233,255,0.9)' : 'rgba(80,200,255,0.7)';
+    g.shadowBlur = S * 0.06;
+    g.stroke();
+    g.shadowBlur = 0;
+    // 数値
+    g.fillStyle = '#fff';
+    g.textAlign = 'center';
+    g.font = `800 ${S * 0.26}px 'Segoe UI', sans-serif`;
+    g.fillText(kmh, cx, cy + S * 0.04);
+    g.fillStyle = 'rgba(200,225,255,0.8)';
+    g.font = `700 ${S * 0.085}px 'Segoe UI', sans-serif`;
+    g.fillText('KM/H', cx, cy + S * 0.2);
   }
 
   // ===== 進行管理 =====
