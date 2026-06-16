@@ -47,6 +47,11 @@
   const hudItem = document.getElementById('hud-item');
   const speedoCanvas = document.getElementById('speedo');
   const spCtx = speedoCanvas.getContext('2d');
+  const gl3dCanvas = document.getElementById('game3d');
+  // ブルーム用の縮小バッファ
+  const bloomCv = document.createElement('canvas');
+  bloomCv.width = 250; bloomCv.height = 150;
+  const bloomCtx = bloomCv.getContext('2d');
   const msgEl = document.getElementById('message');
   const wrongwayEl = document.getElementById('wrongway');
   const panel = document.getElementById('panel');
@@ -2943,7 +2948,17 @@
 
     if (GL3D) {
       renderGL(hor);
-      ctx.clearRect(0, 0, W, H); // 前面レイヤーはエフェクトのみ
+      ctx.clearRect(0, 0, W, H); // 前面レイヤーはエフェクト＋ブルーム
+      // ブルーム: 3D画面を縮小→ぼかし→加算合成でやわらかい発光（次世代風の艶）
+      bloomCtx.clearRect(0, 0, bloomCv.width, bloomCv.height);
+      bloomCtx.drawImage(gl3dCanvas, 0, 0, bloomCv.width, bloomCv.height);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.28;
+      ctx.filter = 'blur(6px)';
+      ctx.drawImage(bloomCv, 0, 0, W, H);
+      ctx.restore();
+      ctx.filter = 'none';
       renderPlayerFX({ x: W / 2, y: H * 0.72 });
     } else {
       // 2Dフォールバック（モード7）
