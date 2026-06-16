@@ -9,6 +9,10 @@ class FightScene extends Phaser.Scene {
   }
 
   create() {
+    // タッチ操作（スマホ/タブレット）対応
+    this.isTouch = this.sys.game.device.input.touch || this.game.device.os.android || this.game.device.os.iOS;
+    // 押下状態（left/right/down=押しっぱなし, up/punch/kick/special=押した瞬間のみ）
+    this.touch = { left: false, right: false, down: false, up: false, punch: false, kick: false, special: false };
     this._startRound(true);
   }
 
@@ -23,6 +27,8 @@ class FightScene extends Phaser.Scene {
     this.roundTimer = ROUND_TIME * 1000;
     this.overDelay = 0;
     this.paused = false;
+    // 押しっぱなし系のタッチ状態はラウンド毎にリセット（指が離れた扱い）
+    if (this.touch) { this.touch.left = this.touch.right = this.touch.down = false; }
 
     drawStage(this, this.cfg.stage);
 
@@ -55,6 +61,8 @@ class FightScene extends Phaser.Scene {
     kb.on("keydown-P", () => { this.paused = !this.paused; this.pauseLabel.setVisible(this.paused); });
     // 矢印キーでの画面スクロール抑止
     this.input.keyboard.addCapture("UP,DOWN,LEFT,RIGHT,SPACE");
+    // マルチタッチ（移動＋攻撃の同時押し）を有効化
+    this.input.addPointer(2);
   }
 
   _readInput(keys) {
@@ -112,13 +120,55 @@ class FightScene extends Phaser.Scene {
       fontFamily: "serif", fontSize: "60px", color: "#ffffff",
     }).setOrigin(0.5).setVisible(false);
 
-    // 操作ヒント
-    const hint = this.cfg.mode === "2p"
-      ? "1P: WASD移動 F弱 G強 H必殺   |   2P: ←↑↓→移動 J弱 K強 L必殺   |   ガード:後ろ入力"
-      : "移動: A/D  ジャンプ: W  しゃがみ: S  弱:F 強:G 必殺:H  ガード:後退入力  Pで一時停止";
-    this.add.text(GAME_W / 2, GAME_H - 16, hint, {
-      fontFamily: "sans-serif", fontSize: "13px", color: "#dfe6ee",
-    }).setOrigin(0.5).setShadow(1, 1, "#000", 3);
+    // 操作ヒント（キーボード時のみ表示）
+    if (!this.isTouch) {
+      const hint = this.cfg.mode === "2p"
+        ? "1P: WASD移動 F弱 G強 H必殺   |   2P: ←↑↓→移動 J弱 K強 L必殺   |   ガード:後ろ入力"
+        : "移動: A/D  ジャンプ: W  しゃがみ: S  弱:F 強:G 必殺:H  ガード:後退入力  Pで一時停止";
+      this.add.text(GAME_W / 2, GAME_H - 16, hint, {
+        fontFamily: "sans-serif", fontSize: "13px", color: "#dfe6ee",
+      }).setOrigin(0.5).setShadow(1, 1, "#000", 3);
+    }
+
+    // 画面上のタッチ操作ボタン
+    if (this.isTouch) this._buildTouchControls();
+  }
+
+  /* ----- タッチ操作ボタン（Player 1 を操作） ----- */
+  _buildTouchControls() {
+    const T = this.touch;
+    const mkBtn = (x, y, r, label, color, fs, onDown, onUp) => {
+      const c = this.add.circle(x, y, r, color, 0.30)
+        .setStrokeStyle(3, 0xffffff, 0.55).setDepth(60)
+        .setScrollFactor(0).setInteractive({ useHandCursor: true });
+      this.add.text(x, y, label, {
+        fontFamily: "sans-serif", fontSize: fs + "px", color: "#ffffff", fontStyle: "bold",
+      }).setOrigin(0.5).setDepth(61);
+      const press = () => { c.setFillStyle(color, 0.6); onDown && onDown(); };
+      const release = () => { c.setFillStyle(color, 0.30); onUp && onUp(); };
+      c.on("pointerdown", press);
+      c.on("pointerup", release);
+      c.on("pointerout", release);
+      return c;
+    };
+
+    const dir = 0x214a73;
+    // 移動（左下・十字配置）
+    const cx = 120, cy = 462;
+    mkBtn(cx - 50, cy, 38, "◀", dir, 24, () => (T.left = true), () => (T.left = false));
+    mkBtn(cx + 50, cy, 38, "▶", dir, 24, () => (T.right = true), () => (T.right = false));
+    mkBtn(cx, cy - 54, 34, "▲", dir, 22, () => (T.up = true), null);        // ジャンプ
+    mkBtn(cx, cy + 52, 30, "▼", dir, 20, () => (T.down = true), () => (T.down = false)); // しゃがみ
+
+    // 攻撃（右下）
+    mkBtn(838, 498, 40, "弱", 0xb5302a, 24, () => (T.punch = true), null);
+    mkBtn(910, 450, 40, "強", 0xc8761f, 24, () => (T.kick = true), null);
+    mkBtn(820, 410, 36, "必殺", 0x8e44ad, 16, () => (T.special = true), null);
+
+    // 一時停止
+    mkBtn(GAME_W / 2, GAME_H - 26, 22, "II", 0x444c5a, 16, () => {
+      this.paused = !this.paused; this.pauseLabel.setVisible(this.paused);
+    }, null);
   }
 
   _refreshLamps() {
@@ -240,6 +290,22 @@ class FightScene extends Phaser.Scene {
     const active = this.roundState === "fight";
     const in1 = active ? this._readInput(this.keys1) : null;
     const in2 = (active && this.cfg.mode === "2p") ? this._readInput(this.keys2) : null;
+
+    // タッチ入力を Player 1 に合成
+    if (in1 && this.isTouch) {
+      const t = this.touch;
+      in1.left = in1.left || t.left;
+      in1.right = in1.right || t.right;
+      in1.down = in1.down || t.down;
+      in1.up = in1.up || t.up;
+      in1.punch = in1.punch || t.punch;
+      in1.kick = in1.kick || t.kick;
+      in1.special = in1.special || t.special;
+    }
+    // 押した瞬間のみのフラグは毎フレーム消費（押しっぱなしでの連続発動を防ぐ）
+    if (this.touch) {
+      this.touch.up = this.touch.punch = this.touch.kick = this.touch.special = false;
+    }
 
     if (dt > 0) {
       this.fighters[0].update(dt, in1);
