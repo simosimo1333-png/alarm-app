@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>飛騨高山ファイター | HIDA TAKAYAMA FIGHTER</title>
+  <meta name="description" content="飛騨高山をモデルにした2D対戦格闘ゲーム。高山祭・さんまち・酒蔵・飛騨牛などをテーマにしたキャラクターとステージで対戦しよう。" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🏯</text></svg>" />
+</head>
+<body>
+  <div id="game-wrap">
+    <div id="game-container"></div>
+    <p class="hint">フルスクリーン非対応の環境ではウィンドウを広げてプレイしてください</p>
+  </div>
+
+  <!-- Phaser 3 (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+
+  <!-- Game source -->
+  <script src="js/config.js"></script>
+  <script src="js/fighter.js"></script>
+  <script src="js/scenes/TitleScene.js"></script>
+  <script src="js/scenes/ModeScene.js"></script>
+  <script src="js/scenes/SelectScene.js"></script>
+  <script src="js/scenes/FightScene.js"></script>
+  <script src="js/scenes/ResultScene.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
