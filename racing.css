@@ -58,74 +58,208 @@ h1 {
 
 #minimap {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 96px;
-  height: 96px;
-  opacity: 0.9;
+  top: 33%;
+  right: 12px;
+  width: 19%;
+  max-width: 120px;
+  aspect-ratio: 1;
+  height: auto;
+  opacity: 0.92;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
 }
 
-/* ---- HUD ---- */
+/* ---- HUD（コンソール風グラスUI） ---- */
 #hud {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  font-weight: bold;
-  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.6);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-weight: 800;
+  --glass: rgba(12, 17, 33, 0.52);
+  --stroke: rgba(255, 255, 255, 0.22);
 }
 
-.hud-left {
+#hud > * {
   position: absolute;
-  top: 10px;
-  left: 12px;
-  text-align: left;
 }
 
-#hud-pos {
-  font-size: 1.8rem;
-  color: #ffd54a;
+/* LAP + タイム（左上） */
+.hud-laptime {
+  top: 2.5%;
+  left: 2.2%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 #hud-lap {
-  font-size: 1rem;
+  font-size: clamp(1rem, 3.6vw, 1.9rem);
+  color: #fff;
+  letter-spacing: 1px;
+  line-height: 1;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7);
 }
 
-#hud-name {
-  font-size: 0.85rem;
-  color: #9fe8ff;
-  max-width: 140px;
-  overflow: hidden;
-  white-space: nowrap;
+#hud-lap b {
+  font-size: 1.35em;
+  color: #ffd54a;
 }
 
-.hud-right {
-  position: absolute;
-  bottom: 10px;
-  right: 12px;
-  text-align: right;
+#hud-lap span {
+  font-size: 0.7em;
+  opacity: 0.85;
 }
 
 #hud-time {
-  font-size: 1.2rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 12px 4px 9px;
+  border-radius: 999px;
+  background: var(--glass);
+  border: 1px solid var(--stroke);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  font-size: clamp(0.8rem, 2.6vw, 1.15rem);
+  color: #eaf2ff;
   font-variant-numeric: tabular-nums;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
-#hud-speed {
-  font-size: 0.85rem;
-  color: #9fe8ff;
+.hud-laptime .sw {
+  font-size: 0.95em;
+  filter: grayscale(0.1);
 }
 
+/* 順位リスト（左中） */
+#hud-standings {
+  top: 27%;
+  left: 2.2%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#hud-standings li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 11px 3px 3px;
+  border-radius: 999px;
+  background: var(--glass);
+  border: 1px solid var(--stroke);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  color: #dfe7f5;
+  font-size: clamp(0.62rem, 2vw, 0.95rem);
+  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.3);
+  transform-origin: left center;
+}
+
+#hud-standings li .badge {
+  width: 1.7em;
+  height: 1.7em;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.95em;
+  color: #1a1320;
+  background: linear-gradient(160deg, #fff, #b9c4d4);
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.25);
+}
+
+#hud-standings li .dot {
+  width: 0.85em;
+  height: 0.85em;
+  border-radius: 50%;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.4);
+}
+
+#hud-standings li .nm {
+  max-width: 6.5em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#hud-standings li.me {
+  background: linear-gradient(100deg, rgba(233, 69, 96, 0.92), rgba(233, 69, 96, 0.55));
+  border-color: rgba(255, 255, 255, 0.6);
+  color: #fff;
+  transform: scale(1.08);
+  box-shadow: 0 4px 14px rgba(233, 69, 96, 0.5);
+}
+
+#hud-standings li.r1 .badge { background: linear-gradient(160deg, #ffe27a, #f0a92e); }
+#hud-standings li.r2 .badge { background: linear-gradient(160deg, #eef3f8, #aab6c6); }
+#hud-standings li.r3 .badge { background: linear-gradient(160deg, #f0b889, #c87a3e); }
+
+/* 大きな順位（右上） */
+#hud-pos {
+  top: 2%;
+  right: 2.5%;
+  display: flex;
+  align-items: flex-start;
+  line-height: 0.85;
+  filter: drop-shadow(0 3px 7px rgba(0, 0, 0, 0.55));
+}
+
+#hud-pos .num {
+  font-size: clamp(2.6rem, 11vw, 5.4rem);
+  font-style: italic;
+  background: linear-gradient(180deg, #fff3b0 8%, #ffd23e 45%, #f08a1d 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 1px rgba(180, 110, 0, 0.4);
+}
+
+#hud-pos .ord {
+  font-size: clamp(1rem, 4vw, 2rem);
+  font-style: italic;
+  color: #ffd23e;
+  margin-top: 0.5em;
+  margin-left: 2px;
+}
+
+/* スピードメーター（右下） */
+#speedo {
+  bottom: 3%;
+  right: 2.5%;
+  width: clamp(74px, 22vw, 120px);
+  height: auto;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
+}
+
+/* アイテム枠（左下） */
 #hud-item {
-  position: absolute;
-  bottom: 10px;
-  left: 12px;
-  width: 52px;
-  height: 52px;
-  border-radius: 12px;
+  bottom: 3.5%;
+  left: 2.5%;
+  width: clamp(48px, 13vw, 74px);
+  aspect-ratio: 1;
+  border-radius: 20%;
   border: 2px solid rgba(255, 255, 255, 0.5);
-  background: rgba(0, 0, 0, 0.35);
-  font-size: 1.9rem;
-  line-height: 48px;
+  background: radial-gradient(circle at 50% 35%, rgba(70, 90, 130, 0.5), rgba(8, 12, 24, 0.72));
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  display: grid;
+  place-items: center;
+  font-size: clamp(1.7rem, 5.5vw, 2.7rem);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.45), inset 0 0 12px rgba(120, 160, 220, 0.25);
+}
+
+#hud-item.has {
+  border-color: #ffe27a;
+  animation: itemglow 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes itemglow {
+  from { box-shadow: 0 5px 16px rgba(0, 0, 0, 0.45), 0 0 8px rgba(255, 210, 60, 0.4); }
+  to   { box-shadow: 0 5px 16px rgba(0, 0, 0, 0.45), 0 0 22px rgba(255, 210, 60, 0.95); }
 }
 
 /* ---- センターメッセージ（カウントダウン等） ---- */
@@ -555,13 +689,6 @@ h1 {
 @media (hover: none) and (pointer: coarse) and (orientation: landscape) {
   h1 {
     display: none;
-  }
-
-  /* タイム表示はボタンと重ならないようミニマップの左へ */
-  .hud-right {
-    bottom: auto;
-    top: 10px;
-    right: 116px;
   }
 
   .race-container {
