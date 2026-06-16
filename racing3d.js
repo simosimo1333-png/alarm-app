@@ -103,6 +103,7 @@ uniform float uAmbient;
 uniform vec3 uFogCol;
 uniform vec2 uFogRange;
 uniform vec3 uCamPos;
+uniform float uSpec;
 varying vec3 vNorm;
 varying vec2 vUV;
 varying vec3 vWorld;
@@ -114,6 +115,13 @@ void main() {
   float diff = max(dot(n, -uLightDir), 0.0);
   vec3 litCol = uLightCol * (uAmbient + diff * (1.05 - uAmbient));
   vec3 rgb = base.rgb * mix(vec3(1.0), litCol, uLit);
+  // 鏡面反射（路面の照り返し・車体のハイライト）
+  if (uSpec > 0.001) {
+    vec3 viewDir = normalize(uCamPos - vWorld);
+    vec3 hv = normalize(viewDir - uLightDir);
+    float s = pow(max(dot(n, hv), 0.0), 28.0) * uSpec;
+    rgb += uLightCol * s;
+  }
   float d = distance(vWorld, uCamPos);
   float f = clamp((d - uFogRange.x) / (uFogRange.y - uFogRange.x), 0.0, 1.0);
   gl_FragColor = vec4(mix(rgb, uFogCol, f), base.a * uAlpha);
@@ -277,7 +285,7 @@ void main() {
 
       const U = {};
       for (const n of ['uProj', 'uView', 'uModel', 'uTex', 'uUseTex', 'uColor', 'uAlpha',
-        'uLit', 'uLightDir', 'uLightCol', 'uAmbient', 'uFogCol', 'uFogRange', 'uCamPos']) {
+        'uLit', 'uLightDir', 'uLightCol', 'uAmbient', 'uFogCol', 'uFogRange', 'uCamPos', 'uSpec']) {
         U[n] = gl.getUniformLocation(prog, n);
       }
       const A = {
@@ -440,37 +448,51 @@ void main() {
 
       // --- カートモデル（パーツ＝メッシュ+ローカル変換+色） ---
       const kartCache = new Map();
-      function kartModel(body, helmet) {
-        const key = body + helmet;
+      function kartModel(body, helmet, fur) {
+        const key = body + helmet + (fur || '');
         let m = kartCache.get(key);
         if (m) return m;
         const B = hexToRgb(body), Hm = hexToRgb(helmet);
+        const F = fur ? hexToRgb(fur) : [0.9, 0.62, 0.32]; // 毛色（既定はオレンジ猫）
+        const FD = shadeRgb(F, -0.18);
+        const MZ = shadeRgb(F, 0.22);       // 口元（明るい毛）
+        const PINK = [0.95, 0.6, 0.62];     // 耳の内側
+        const EYE = [0.1, 0.08, 0.07];
         const D = [0.09, 0.09, 0.11];       // タイヤ
         const RIM = [0.62, 0.66, 0.72];     // ホイールのハブ
         const SUIT = shadeRgb(Hm, -0.16);   // ドライバーのスーツ
-        // [mesh, sx,sy,sz, px,py,pz, color]（前方 = +z）
+        // [mesh, sx,sy,sz, px,py,pz, color, spec]（前方 = +z）
         m = [
           // 下部シャシー（低く広く）
           [MESH.cube, 29, 4.5, 44, 0, 5.5, 0, shadeRgb(B, -0.2)],
-          // メインボディ
-          [MESH.cube, 24, 6.5, 30, 0, 9.5, -1, B],
+          // メインボディ（照り返しあり）
+          [MESH.cube, 24, 6.5, 30, 0, 9.5, -1, B, 0.35],
           // ボンネット
-          [MESH.cube, 18, 5, 17, 0, 9.8, 15, shadeRgb(B, 0.12)],
+          [MESH.cube, 18, 5, 17, 0, 9.8, 15, shadeRgb(B, 0.12), 0.4],
           // ノーズ先端
-          [MESH.cube, 12, 3.6, 9, 0, 8.6, 23, shadeRgb(B, 0.2)],
+          [MESH.cube, 12, 3.6, 9, 0, 8.6, 23, shadeRgb(B, 0.2), 0.4],
           // サイドポンツーン
-          [MESH.cube, 4.6, 6.5, 24, -12.8, 8.6, 1, shadeRgb(B, -0.12)],
-          [MESH.cube, 4.6, 6.5, 24, 12.8, 8.6, 1, shadeRgb(B, -0.12)],
+          [MESH.cube, 4.6, 6.5, 24, -12.8, 8.6, 1, shadeRgb(B, -0.12), 0.3],
+          [MESH.cube, 4.6, 6.5, 24, 12.8, 8.6, 1, shadeRgb(B, -0.12), 0.3],
           // 上面のメタリック・ハイライト帯
-          [MESH.cube, 15, 1.3, 27, 0, 13, 0, shadeRgb(B, 0.32)],
+          [MESH.cube, 15, 1.3, 27, 0, 13, 0, shadeRgb(B, 0.32), 0.6],
           // コックピット縁
           [MESH.cube, 15, 4.5, 15, 0, 12.6, -7, [0.12, 0.12, 0.15]],
-          // ドライバー胴
-          [MESH.cube, 9, 8, 9, 0, 15.5, -6, SUIT],
-          // ヘルメット
-          [MESH.sphere, 6.6, 6.6, 6.6, 0, 20.5, -4, Hm],
-          // バイザー
-          [MESH.cube, 7.6, 3, 2.4, 0, 20, 1.4, [0.07, 0.1, 0.16]],
+          // ドライバー胴（マスコットの体）
+          [MESH.cube, 9.5, 8, 9, 0, 15.5, -6, F],
+          [MESH.cube, 6, 5, 7, 0, 15, -2.5, MZ],   // お腹の白
+          // --- 動物マスコットの頭 ---
+          [MESH.sphere, 6.2, 6, 6, 0, 20.5, -4.5, F],     // 頭
+          [MESH.cube, 5, 3.4, 3, 0, 19, 1.4, MZ],         // 口元（マズル）
+          [MESH.cube, 2.2, 1.3, 1, 0, 18.6, 3, [0.15, 0.1, 0.1]], // 鼻
+          [MESH.sphere, 1.4, 1.8, 1.1, -2.5, 21.5, 2.2, EYE], // 左目
+          [MESH.sphere, 1.4, 1.8, 1.1, 2.5, 21.5, 2.2, EYE],  // 右目
+          // 三角の耳（頭の上に乗る）
+          [MESH.cube, 3.6, 8, 2.4, -3.8, 26.5, -4.8, F],
+          [MESH.cube, 3.6, 8, 2.4, 3.8, 26.5, -4.8, F],
+          // 耳の内側（ピンク）
+          [MESH.cube, 1.8, 4, 1.1, -3.8, 27, -3.9, PINK],
+          [MESH.cube, 1.8, 4, 1.1, 3.8, 27, -3.9, PINK],
           // リアウィング
           [MESH.cube, 27, 1.9, 9, 0, 20.5, -20, shadeRgb(B, -0.26)],
           [MESH.cube, 2.4, 6.5, 2.4, -8.5, 15.5, -20, shadeRgb(B, -0.32)],
@@ -517,6 +539,7 @@ void main() {
         gl.uniform3fv(U.uColor, color || [1, 1, 1]);
         gl.uniform1f(U.uAlpha, o.alpha !== undefined ? o.alpha : 1);
         gl.uniform1f(U.uLit, o.lit !== undefined ? o.lit : 1);
+        gl.uniform1f(U.uSpec, o.spec || 0);
         if (o.tex) {
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, o.tex);
@@ -584,28 +607,32 @@ void main() {
         view = viewMatrix(eye, fwd, [0, 1, 0]);
         setCommon();
 
-        // 地面
+        // 地面（路面は照り返しを少し、周囲の草地はマット）
         gl.disable(gl.BLEND);
         // 地形を先に描き、周囲の草地は深度テストで隠れた分の塗りを省く
-        draw(terrainMesh || MESH.ground, scaleAt(1, 1, 1, 0, 0, 0), [1, 1, 1], { tex: trackTex });
+        draw(terrainMesh || MESH.ground, scaleAt(1, 1, 1, 0, 0, 0), [1, 1, 1], { tex: trackTex, spec: 0.16 });
         draw(MESH.surround, scaleAt(1, 1, 1, -20000 + TEX / 2, -0.6, -20000 + TEX / 2), [1, 1, 1], { tex: grassTex });
         gl.enable(gl.BLEND);
 
-        // 影（地面の上、デプス書き込みなし）
+        // 影（地面の上、デプス書き込みなし）。太陽と逆方向に少しずらす
         gl.depthMask(false);
-        const flatQuad = (x, z, s, alpha) => {
+        const lx = light.dir[0], lz = light.dir[2];
+        const ll = Math.hypot(lx, lz) || 1;
+        const sox = -(lx / ll) * 8, soz = -(lz / ll) * 8; // 影のオフセット
+        const flatQuad = (x, z, w, d, alpha) => {
           draw(MESH.bill, new Float32Array([
-            s, 0, 0, 0,
-            0, 0, s, 0,
+            w, 0, 0, 0,
+            0, 0, d, 0,
             0, 1, 0, 0,
-            x, hAt(x, z) + 1.2, z - s / 2, 1,
+            x + sox, hAt(x, z) + 1.2, z - d / 2 + soz, 1,
           ]), [1, 1, 1], { tex: canvasTex(shadowCv), lit: 0, alpha });
         };
         for (const k of f.karts) {
-          const s = Math.max(0.55, 1 - k.lift / 90);
-          flatQuad(k.x, k.z, 38 * s, s);
+          const s = Math.max(0.5, 1 - k.lift / 90);
+          // 進行方向に少し伸びた楕円の影
+          flatQuad(k.x, k.z, 34 * s, 46 * s, s * 0.9);
         }
-        for (const b of f.bananas) flatQuad(b.x, b.z, 20, 0.7);
+        for (const b of f.bananas) flatQuad(b.x, b.z, 20, 20, 0.7);
         gl.depthMask(true);
 
         const dist2 = (x, z) => (x - camPos[0]) ** 2 + (z - camPos[2]) ** 2;
@@ -623,25 +650,27 @@ void main() {
           }
         }
 
-        // カート（不透明）
+        // カート（不透明・車体に照り返し）
         for (const k of f.karts) {
-          const model = kartModel(k.body, k.helmet);
+          const model = kartModel(k.body, k.helmet, k.fur);
           const base = [k.x, hAt(k.x, k.z) + k.lift, k.z];
           for (const part of model) {
-            draw(part[0], partMatrix(k.a, k.roll || 0, base, part), part[7]);
+            draw(part[0], partMatrix(k.a, k.roll || 0, base, part), part[7], { spec: part[8] || 0 });
           }
         }
 
         // 半透明（奥から手前へ）
         const trans = [];
+        const t = f.time;
         for (const d of f.decos) {
           const dd = dist2(d.x, d.z);
           if (dd > FOG_FAR2) continue; // フォグで見えない距離は描かない
+          // アニメーションする飾り（滝・のぼり旗）はフレームを時間で切り替え
+          const cv = d.frames ? d.frames[(t * d.fps | 0) % d.frames.length] : d.canvas;
           trans.push({ d: dd, fn: () => {
-            draw(MESH.bill, billboard(d.x, d.y0 || 0, d.z, d.w, d.h), [1, 1, 1], { tex: canvasTex(d.canvas), lit: 0 });
+            draw(MESH.bill, billboard(d.x, d.y0 || 0, d.z, d.w, d.h), [1, 1, 1], { tex: canvasTex(cv), lit: 0 });
           } });
         }
-        const t = f.time;
         for (const b of f.boxes) {
           const near = Math.sqrt(dist2(b.x, b.z));
           const alpha = Math.max(0, Math.min(0.62, (near - 80) / 120));
