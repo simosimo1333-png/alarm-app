@@ -608,6 +608,21 @@ void main() {
         for (const b of f.bananas) flatQuad(b.x, b.z, 20, 0.7);
         gl.depthMask(true);
 
+        const dist2 = (x, z) => (x - camPos[0]) ** 2 + (z - camPos[2]) ** 2;
+        const FOG_FAR2 = FOG_RANGE[1] * FOG_RANGE[1];
+
+        // 通り抜けられる3Dゲート（鳥居・スタートゲート）
+        // 部品は [sx,sy,sz,px,py,pz,[r,g,b]]（メッシュはcube固定）
+        if (f.gates) {
+          for (const gt of f.gates) {
+            if (dist2(gt.x, gt.z) > FOG_FAR2) continue;
+            const base = [gt.x, hAt(gt.x, gt.z), gt.z];
+            for (const p of gt.parts) {
+              draw(MESH.cube, partMatrix(gt.a, 0, base, [0, p[0], p[1], p[2], p[3], p[4], p[5]]), p[6]);
+            }
+          }
+        }
+
         // カート（不透明）
         for (const k of f.karts) {
           const model = kartModel(k.body, k.helmet);
@@ -619,8 +634,6 @@ void main() {
 
         // 半透明（奥から手前へ）
         const trans = [];
-        const dist2 = (x, z) => (x - camPos[0]) ** 2 + (z - camPos[2]) ** 2;
-        const FOG_FAR2 = FOG_RANGE[1] * FOG_RANGE[1];
         for (const d of f.decos) {
           const dd = dist2(d.x, d.z);
           if (dd > FOG_FAR2) continue; // フォグで見えない距離は描かない
