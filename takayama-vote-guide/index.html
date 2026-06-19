@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>高山市長選挙 投票マッチング｜アンケートで投票先のヒントを見つけよう</title>
+  <meta name="description" content="高山市長選挙で誰に投票するか迷っている方へ。かんたんなアンケートに答えるだけで、あなたの考えに近い候補者がわかります。" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1>高山市長選挙<br /><span class="accent">投票マッチング</span></h1>
+      <p class="tagline">12個の質問に答えるだけ。あなたの考えに近い候補者がわかります。</p>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- 注意書き -->
+    <div class="notice" role="note">
+      <strong>⚠ ご利用にあたって</strong>
+      <p>
+        このサイトはアンケートの結果から「考え方が近い候補者」を参考表示するツールです。
+        投票先を決めるのはあなた自身です。最終的には選挙公報や各候補者の公式情報を必ずご確認ください。
+      </p>
+      <p class="sample-warn" id="sampleWarn">
+        ※現在表示している候補者情報は <b>サンプル（架空）</b> です。実際の選挙で使うには
+        <code>data.js</code> を一次情報にもとづいて更新してください。
+      </p>
+    </div>
+
+    <!-- スタート画面 -->
+    <section id="screen-intro" class="screen active">
+      <div class="card">
+        <h2>はじめに</h2>
+        <ul class="intro-list">
+          <li>各質問に「賛成〜反対」の5段階でお答えください。</li>
+          <li>特に大切だと思うテーマは「重視する」をオンにすると、結果に強く反映されます。</li>
+          <li>わからない質問は「スキップ」できます（結果計算から除外）。</li>
+          <li>回答はこの端末内だけで処理され、どこにも送信されません。</li>
+        </ul>
+        <button class="btn btn-primary btn-lg" id="startBtn">アンケートを始める</button>
+      </div>
+    </section>
+
+    <!-- 設問画面 -->
+    <section id="screen-quiz" class="screen">
+      <div class="progress-wrap">
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-text"><span id="progressNum">1</span> / <span id="progressTotal">12</span></div>
+      </div>
+
+      <div class="card question-card">
+        <div class="q-category" id="qCategory"></div>
+        <h2 class="q-text" id="qText"></h2>
+        <p class="q-detail" id="qDetail"></p>
+
+        <div class="options" id="options"></div>
+
+        <label class="importance">
+          <input type="checkbox" id="importanceChk" />
+          <span>このテーマを<strong>重視する</strong>（結果に2倍反映）</span>
+        </label>
+
+        <div class="q-nav">
+          <button class="btn btn-ghost" id="prevBtn">← 戻る</button>
+          <button class="btn btn-ghost" id="skipBtn">スキップ →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 結果画面 -->
+    <section id="screen-result" class="screen">
+      <div class="card">
+        <h2>診断結果</h2>
+        <p class="result-lead">あなたの回答と、考え方が近い順に並べました。</p>
+        <div id="resultList" class="result-list"></div>
+
+        <h3 class="detail-title">質問ごとの比較</h3>
+        <div id="detailTable" class="detail-table-wrap"></div>
+
+        <div class="result-actions">
+          <button class="btn btn-primary" id="restartBtn">もう一度やる</button>
+          <button class="btn btn-ghost" id="shareBtn">結果をコピー</button>
+        </div>
+        <p class="disclaimer">
+          ※この結果は回答とサンプルデータの一致度を示すものであり、特定候補への投票を推奨するものではありません。
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>本サイトは投票判断の参考情報を提供するものです。回答データは端末外に送信されません。</p>
+    </div>
+  </footer>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
