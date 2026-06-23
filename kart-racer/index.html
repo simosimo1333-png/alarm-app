@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>🏁 アニマル カートレーシング</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="stage">
+    <canvas id="scene"></canvas>
+
+    <!-- ===== HUD ===== -->
+    <div id="hud" class="hidden">
+      <!-- top-left: lap + timer -->
+      <div class="hud-tl">
+        <div class="lap">LAP <b><span id="lap-cur">1</span></b><span class="lap-tot">/<span id="lap-max">3</span></span></div>
+        <div class="time"><span class="clock">⏱</span><span id="time-val">00:00.00</span></div>
+      </div>
+
+      <!-- standings list -->
+      <ol id="standings"></ol>
+
+      <!-- top-right: position ordinal -->
+      <div id="position"><span class="pnum" id="pos-num">4</span><span class="pord" id="pos-ord">th</span></div>
+
+      <!-- top-right: minimap -->
+      <canvas id="minimap" width="150" height="150"></canvas>
+
+      <!-- bottom-left: item box -->
+      <div id="item-box"><div id="item-icon"></div><span class="item-x">X</span></div>
+
+      <!-- bottom-right: speedometer -->
+      <canvas id="speedo" width="180" height="180"></canvas>
+    </div>
+
+    <div id="countdown" class="hidden"></div>
+    <div id="banner" class="hidden"></div>
+    <div id="wrongway" class="hidden">⚠ 逆走中</div>
+
+    <!-- ===== Title / Menu ===== -->
+    <div id="menu">
+      <h1 class="game-title">ANIMAL<span>KART</span>RACING</h1>
+      <p class="subtitle">🏁 アニマル カートレーシング</p>
+
+      <div class="select-block">
+        <h2>コースを えらぶ</h2>
+        <div id="course-list"></div>
+      </div>
+
+      <div class="select-block">
+        <h2>キャラクターを えらぶ</h2>
+        <div id="char-list"></div>
+      </div>
+
+      <button id="start-btn">スタート！</button>
+      <p class="hint">操作: ← → / A D = ハンドル ・ ↑ / W = アクセル ・ ↓ / S = ブレーキ ・ Space = アイテム ・ Shift = ドリフト</p>
+    </div>
+
+    <!-- ===== Results ===== -->
+    <div id="results" class="hidden">
+      <h1 id="result-title">FINISH!</h1>
+      <ol id="result-list"></ol>
+      <button id="again-btn">もう一度</button>
+      <button id="menu-btn">コース選択へ</button>
+    </div>
+
+    <!-- ===== Touch controls ===== -->
+    <div id="touch" class="hidden">
+      <div class="t-left">
+        <button class="tbtn" id="t-left">◀</button>
+        <button class="tbtn" id="t-right">▶</button>
+      </div>
+      <div class="t-right">
+        <button class="tbtn t-item" id="t-item">🎁</button>
+        <button class="tbtn t-brake" id="t-brake">⬇</button>
+        <button class="tbtn t-gas" id="t-gas">GO</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
