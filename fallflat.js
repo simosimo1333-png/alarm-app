@@ -13,7 +13,8 @@ const MAX_PLAYERS = 5;
 const GRAVITY = -18;
 const FIXED_DT = 1 / 60;
 const FALL_Y = -8;               // 物がこれよりしずんだら持ち場へもどる
-const WATER_Y = -3.5;            // 水面の高さ（落ちてもおよげる！）
+const WATER_Y = -3.5;            // 海面の高さ（見た目のはいけい）
+const RESPAWN_Y = -2.4;          // これより落ちたらチェックポイントからやりなおし（海に落ちる前）
 const SNAP_MS = 50;              // ホストの配信間隔 (20Hz)
 const INPUT_MS = 50;             // ゲストの入力送信間隔
 const INTERP_DELAY = 130;        // ゲスト側の補間遅延(ms)
@@ -1643,22 +1644,14 @@ class Doll {
 
     // 着地音（空中→接地の瞬間だけ・歩行中の接触では鳴らさない）
     if (grounded) {
-      if (this.airTime > 0.28 && torso.position.y - 0.63 > WATER_Y) this.hitSound('land');
+      if (this.airTime > 0.28) this.hitSound('land');
       this.airTime = 0;
     } else {
       this.airTime += FIXED_DT;
     }
 
-    // ── 水: 体のしずんだ割合に応じた浮力（気絶中でもうく）
-    const sub = Math.min(1, Math.max(0, (WATER_Y - (torso.position.y - 0.63)) / 1.26));
-    const swimming = sub > 0.3;
-    if (sub > 0) {
-      // 浮力＋つよめの上下ダンピング（弱いとバネのように上下に振動しつづける）
-      torso.force.y += sub * torso.mass * -GRAVITY * 1.6 - torso.velocity.y * torso.mass * 6 * sub;
-    }
-
     // トランポリン
-    if (grounded && !swimming && ray.body.bouncePad && torso.velocity.y < 2) {
+    if (grounded && ray.body.bouncePad && torso.velocity.y < 2) {
       torso.velocity.y = ray.body.bouncePad;
     }
 
@@ -1682,10 +1675,9 @@ class Doll {
         torso.torque.y += d * 22 - torso.angularVelocity.y * 4;
 
         const s = Math.min(1, mlen);
-        const spd = swimming ? 2.4 : 4.2;           // 水中はゆっくり
-        const tvx = gvx + (inp.x / mlen) * spd * s;
-        const tvz = gvz + (inp.z / mlen) * spd * s;
-        const k = grounded ? 0.18 : (swimming ? 0.06 : 0.045);
+        const tvx = gvx + (inp.x / mlen) * 4.2 * s;
+        const tvz = gvz + (inp.z / mlen) * 4.2 * s;
+        const k = grounded ? 0.18 : 0.045;
         torso.velocity.x += (tvx - torso.velocity.x) * k;
         torso.velocity.z += (tvz - torso.velocity.z) * k;
       } else {
@@ -1694,18 +1686,14 @@ class Doll {
           // 立ちどまるブレーキ（うごく床の速度にあわせる）
           torso.velocity.x += (gvx - torso.velocity.x) * 0.16;
           torso.velocity.z += (gvz - torso.velocity.z) * 0.16;
-        } else if (swimming) {
-          torso.velocity.x += -torso.velocity.x * 0.05;
-          torso.velocity.z += -torso.velocity.z * 0.05;
         }
       }
 
-      // ── ジャンプ（ぶらさがり中は手をはなして跳ぶ・水中はひとかき）
+      // ── ジャンプ（ぶらさがり中は手をはなして跳ぶ）
       if (inp.j !== this.lastJump) {
         this.lastJump = inp.j;
-        if (grounded && !swimming) torso.velocity.y = 7.2;
+        if (grounded) torso.velocity.y = 7.2;
         else if (hanging) { this.releaseGrabs(); torso.velocity.y = 6.2; }
-        else if (swimming) torso.velocity.y = Math.min(torso.velocity.y + 3.4, 4.5);
       }
     }
 
@@ -1730,6 +1718,27 @@ class Doll {
         if (!s.grabC && simT > s.cool) this.tryGrab(s);
       } else if (s.grabC) {
         this.releaseSide(s);
+      }
+    }
+
+    // ── よじのぼり（本家風マントル）: 自分より上をつかんでいると
+    //    ホールドをちぢめ、ぐいっと体をひきあげて ふちの上へ乗りこえる
+    if (!limp) {
+      // 前に出る方向（入力があれば入力方向、なければ体のむき）
+      let fx, fz;
+      const ml = Math.hypot(inp.x, inp.z);
+      if (ml > 0.15) { fx = inp.x / ml; fz = inp.z / ml; }
+      else { const f = torso.quaternion.vmult(new CANNON.Vec3(0, 0, 1)); fx = f.x; fz = f.z; }
+      for (const s of this.sides) {
+        if (!s.grabC || !s.holdC) continue;
+        const hy = s.body.position.y;
+        if (hy > torso.position.y + 0.15) {          // 手が体よりはっきり上＝ふち・高所
+          s.holdC.distance = Math.max(0.3, s.holdC.distance - 3 * FIXED_DT);
+          torso.force.y += torso.mass * (-GRAVITY + 9); // ぐいっと上へ
+          torso.force.x += fx * torso.mass * 3.5;        // ふちの上へ前進
+          torso.force.z += fz * torso.mass * 3.5;
+          if (torso.position.y > hy - 0.2) this.releaseSide(s); // 乗ったら手をはなす
+        }
       }
     }
   }
@@ -2225,19 +2234,19 @@ function hostStep(dt, now) {
   while (phyAcc >= FIXED_DT) {
     simT += FIXED_DT;
     stepGimmicks();
-    stepWater();
     for (const doll of dolls.values()) doll.control();
     world.step(FIXED_DT);
     phyAcc -= FIXED_DT;
   }
 
-  // 落下・水・チェックポイント・ゴール判定
+  // 落下・チェックポイント・ゴール判定
   for (const doll of dolls.values()) {
     const p = doll.torso.position;
-    if (p.y < -12) { doll.respawn(); continue; } // 万一 水面をつきぬけたら復帰
-    if (!doll.wetMsg && p.y < WATER_Y + 0.4) {
-      doll.wetMsg = true;
-      tellDoll(doll, '🌊 水におちた！スロープまでおよいであがろう（R = もどる）', 'splash');
+    // 落ちたら海に落ちる前にチェックポイントからやり直し
+    if (p.y < RESPAWN_Y) {
+      doll.respawn();
+      tellDoll(doll, '💫 チェックポイントからやりなおし！');
+      continue;
     }
     for (const zn of CP_ZONES) {
       if (zn.cp > doll.cp && p.x > zn.x0 && p.x < zn.x1 && p.z > zn.z0 && p.z < zn.z1 && p.y > zn.yMin && p.y < zn.yMin + 5) {
