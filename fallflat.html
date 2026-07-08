@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#87b9e7" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧍</text></svg>" />
+  <title>ふにゃふにゃアスレチック</title>
+  <link rel="stylesheet" href="fallflat.css" />
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="game"></canvas>
+
+    <!-- ゲーム中HUD -->
+    <div id="hud" class="hidden">
+      <div id="hud-top">
+        <div id="hud-room" class="hidden">🔑 ルームコード <b id="hud-code"></b></div>
+        <div id="hud-players"></div>
+      </div>
+      <div id="hud-msg" class="hidden"></div>
+      <div id="hud-btns">
+        <button id="hud-mute" title="サウンド ON/OFF">🔊</button>
+        <button id="hud-fs" title="全画面">⛶</button>
+        <button id="hud-respawn" title="リスポーン (R)">↺ もどる</button>
+        <button id="hud-leave">メニュー</button>
+      </div>
+    </div>
+
+    <!-- メニューパネル -->
+    <div id="panel">
+      <button id="menu-mute" title="サウンド ON/OFF">🔊</button>
+      <h1>🧍 ふにゃふにゃアスレチック</h1>
+      <p class="sub">ふにゃふにゃ人間をあやつってゴールをめざせ！<br />さいだい5人でいっしょに遊べるよ</p>
+      <div class="row">
+        <label for="name">なまえ</label>
+        <input id="name" maxlength="8" placeholder="あなた" />
+      </div>
+      <div class="skin-box">
+        <div class="skin-title">コース（ルームを作る人がえらぶ）</div>
+        <div id="course-row"></div>
+      </div>
+      <div class="skin-box">
+        <div class="skin-title">キャラクターのスキン</div>
+        <div id="color-row"></div>
+        <div id="hat-row"></div>
+      </div>
+      <button id="solo-btn">▶ ひとりで遊ぶ</button>
+      <div class="net-box">
+        <button id="host-btn">🏠 ルームを作る（とちゅう参加OK・5人まで）</button>
+        <div class="join-row">
+          <input id="code-input" inputmode="numeric" maxlength="4" placeholder="コード" />
+          <button id="join-btn">参加する</button>
+        </div>
+        <div id="net-status"></div>
+      </div>
+      <p class="help">
+        🖥️ WASD / 矢印 = 移動 ・ スペース = ジャンプ ・ マウス左 = 左手 / 右 = 右手 / Shift = 両手でつかむ ・ カメラを上下にむけると うでの高さがかわる ・ R = もどる<br />
+        📱 左スティック = 移動 ・ ✊ = 両手でつかむ ・ 画面スワイプ = カメラ<br />
+        🌊 水におちても およげる！スロープをさがしてあがろう
+      </p>
+      <p class="help"><a href="racing.html">🏁 カートレースで遊ぶ</a></p>
+    </div>
+
+    <!-- タッチ操作 -->
+    <div id="touch" class="hidden">
+      <div id="stick"><div id="stick-knob"></div></div>
+      <div id="tbtns">
+        <button id="t-grab">✊<span>つかむ</span></button>
+        <button id="t-jump">⬆<span>ジャンプ</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- importmap非対応のふるいスマホブラウザ用ポリフィル -->
+  <script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+    }
+  }
+  </script>
+  <script type="module" src="fallflat.js"></script>
+</body>
+</html>
