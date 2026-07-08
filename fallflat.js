@@ -173,6 +173,12 @@ const MAT = {
   cloud: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }),
   trunk: new THREE.MeshStandardMaterial({ color: 0x8a6242, roughness: 1 }),
   leaf: new THREE.MeshStandardMaterial({ color: 0x4fae5c, roughness: 0.9 }),
+  // 工場コース用
+  metal: new THREE.MeshStandardMaterial({ color: 0x8a95a3, roughness: 0.45, metalness: 0.6 }),
+  metalDark: new THREE.MeshStandardMaterial({ color: 0x5b636e, roughness: 0.5, metalness: 0.6 }),
+  hazard: new THREE.MeshStandardMaterial({ color: 0xf0a020, roughness: 0.6 }),
+  piston: new THREE.MeshStandardMaterial({ color: 0xe8543f, roughness: 0.4, metalness: 0.3 }),
+  fan: new THREE.MeshStandardMaterial({ color: 0x74c0fc, roughness: 0.4, transparent: true, opacity: 0.55 }),
 };
 
 // ベルトコンベア（縞テクスチャをスクロールさせて流れを見せる）
@@ -601,6 +607,143 @@ function buildCourse2() {
 }
 
 /* =====================================================================
+   コース3「ドキドキ工場」— ピストン・プレス・回転床・エレベーター・
+   上昇気流ファンなど機械じかけ満載のコース
+   ===================================================================== */
+function buildCourse3() {
+  // 鉄板の床（上面が topY）
+  const mfloor = (w, d, x, topY, z, mat = MAT.metal) => staticBox(w, 0.5, d, x, topY - 0.25, z, mat);
+  // ハザード柄のふち
+  const rail = (w, d, x, topY, z) => staticBox(w, 0.35, d, x, topY + 0.17, z, MAT.hazard);
+
+  // --- α スタート鉄板 (z-2..5, y0)
+  mfloor(7, 8, 0, 0, 1.5);
+  rail(7, 0.3, 0, 0, -2.3);
+  rail(0.3, 8, -3.3, 0, 1.5);
+  rail(0.3, 8, 3.3, 0, 1.5);
+
+  // --- ピストン通路 (z5..17, y0, はば3・柵なし): 横からピストンがドン！
+  mfloor(3, 12, 0, 0, 11);
+  const pistonAt = (x, z, dir, phase) => {
+    // 土台（かべ）
+    staticBox(0.7, 1.6, 1.4, x, 0.55, z, MAT.metalDark);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 1.0), MAT.piston);
+    const base = x - dir * 0.5; // ひっこんだ位置（かべの内がわ）
+    const idx = kinObject(head, 'box', [0.8, 0.8, 1.0], [base, 0.7, z]);
+    (GIM.pistons || (GIM.pistons = [])).push({ idx, axis: 'x', base, reach: 2.4, dir, period: 2.6, phase });
+  };
+  pistonAt(2.1, 8, -1, 0);
+  pistonAt(-2.1, 11.3, 1, 1.3);
+  pistonAt(2.1, 14.6, -1, 0.6);
+
+  // --- β 中継床 (z17..23, y0): チェックポイント1
+  mfloor(7, 6, 0, 0, 20);
+  rail(0.3, 6, -3.3, 0, 20);
+  rail(0.3, 6, 3.3, 0, 20);
+  pennant(-2.4, 0, 18, 0x4dabf7);
+
+  // --- ベルト橋 (z23..30, ながれ -z = ぎゃく): 流れにさからって進む
+  staticBox(3, 0.4, 7, 0, -0.2, 26.5, MAT.belt, 0, { belt: [0, 0, -2.4] });
+  rail(0.28, 7, -1.62, 0, 26.5);
+  rail(0.28, 7, 1.62, 0, 26.5);
+
+  // --- プレス通路 (z30..42, y0): プレス機が上からドスン！
+  mfloor(5, 12, 0, 0, 36);
+  rail(0.3, 12, -2.7, 0, 36);
+  rail(0.3, 12, 2.7, 0, 36);
+  const crusherAt = (z, phase) => {
+    staticBox(4.4, 0.4, 0.5, 0, 5.2, z, MAT.metalDark); // 天井のレール
+    const head = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.4, 1.6), MAT.piston);
+    const idx = kinObject(head, 'box', [3.6, 1.4, 1.6], [0, 4.3, z]);
+    (GIM.crushers || (GIM.crushers = [])).push({ idx, top: 4.3, drop: 3.2, period: 3.0, phase });
+  };
+  crusherAt(33.5, 0);
+  crusherAt(38.5, 1.5);
+
+  // --- γ 床 (z42..47, y0): チェックポイント2
+  mfloor(7, 5, 0, 0, 44.5);
+  rail(0.3, 5, -3.3, 0, 44.5);
+  rail(0.3, 5, 3.3, 0, 44.5);
+  pennant(-2.4, 0, 43, 0x51cf66);
+
+  // --- 回転床の谷 (z47..57): まわる床を2枚わたる
+  const turntableAt = (x, z, omega) => {
+    staticBox(0.5, 1.0, 0.5, x, -0.5, z, MAT.metalDark); // 軸
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 0.3, 28), MAT.plat);
+    const idx = kinObject(disc, 'box', [4.4, 0.3, 4.4], [x, -0.15, z]);
+    dynObjects[idx].spin = omega;          // 上のプレイヤーを一緒にまわす（接線速度で運ぶ）
+    dynObjects[idx].spinCenter = [x, z];
+    // 見た目の矢印（回っているのがわかる）
+    const mark = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.12, 0.4), MAT.hazard);
+    mark.position.y = 0.2;
+    disc.add(mark);
+    (GIM.turntables || (GIM.turntables = [])).push({ idx, omega });
+  };
+  turntableAt(0, 49.5, 0.6);
+  turntableAt(0, 54, -0.7);
+
+  // --- δ 床 (z57..62, y0): チェックポイント3
+  mfloor(7, 5, 0, 0, 59.5);
+  rail(0.3, 5, -3.3, 0, 59.5);
+  rail(0.3, 5, 3.3, 0, 59.5);
+  pennant(-2.4, 0, 58, 0xffd43b);
+
+  // --- エレベーター (z62..66): 床にのって y0 → y5 へあがる
+  staticBox(3.4, 5.6, 0.5, -2.3, 2.5, 64, MAT.metalDark); // ガイドの柱
+  staticBox(3.4, 5.6, 0.5, 2.3, 2.5, 64, MAT.metalDark);
+  {
+    const plat = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.4, 3.4), MAT.plat);
+    const idx = kinObject(plat, 'box', [3.6, 0.4, 3.4], [0, -0.2, 64]);
+    (GIM.elevators || (GIM.elevators = [])).push({ idx, y0: -0.2, y1: 4.8, period: 7.5, phase: 0 });
+  }
+
+  // --- ζ 高い床 (z66..70, y5): エレベーターでのぼった先
+  mfloor(7, 5, 0, 5, 68);
+  rail(0.3, 5, -3.3, 5, 68);
+  rail(0.3, 5, 3.3, 5, 68);
+
+  // --- 上昇気流シャフト (z70..74): ファンで y5 → y9 へふきあがる
+  staticBox(0.5, 5, 4.4, -2.4, 7.5, 72, MAT.metalDark); // シャフトのかべ
+  staticBox(0.5, 5, 4.4, 2.4, 7.5, 72, MAT.metalDark);
+  {
+    const fanBase = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 0.4, 20), MAT.metalDark);
+    fanBase.position.set(0, 5.0, 72);
+    levelRoot.add(fanBase);
+    // 風の見た目（うすい青のはしら）
+    const wind = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 4.4, 16, 1, true), MAT.fan);
+    wind.position.set(0, 7.4, 72);
+    levelRoot.add(wind);
+    GIM.updrafts = [{ x: 0, z: 72, rx: 1.9, rz: 2.2, y0: 4.8, y1: 10.5, lift: 12, vmax: 5.2 }];
+    GIM.fanWind = wind;
+  }
+
+  // --- ゴール塔 (z74..79, y8.5)
+  mfloor(8, 5, 0, 8.5, 76.5);
+  rail(0.3, 5, -3.8, 8.5, 76.5);
+  rail(8, 0.3, 0, 8.5, 79);
+  {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.6, 10), MAT.metal);
+    pole.position.set(0, 8.5 + 1.3, 77.5);
+    pole.castShadow = true;
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.8), MAT.flag);
+    flag.position.set(0.7, 8.5 + 2.1, 77.5);
+    levelRoot.add(pole, flag);
+  }
+
+  // --- レスキュー用のあしば（水におちても戻れる階段状の足場）
+  for (let i = 0; i < 4; i++) staticBox(3, 0.4, 2, 6.5, -3.0 + i * 0.9, 10 + i * 2.2, MAT.metalDark);
+
+  // --- 背景の工場シルエット（見た目だけ）
+  for (const [ix, iy, iz, s] of [[16, -2, 20, 1.4], [-15, -2, 42, 1.2], [17, 2, 62, 1.0]]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(5 * s, 8 * s, 5 * s), MAT.metalDark);
+    b.position.set(ix, iy, iz);
+    const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.6 * s, 0.7 * s, 5 * s, 10), MAT.metalDark);
+    chimney.position.set(ix + 2 * s, iy + 5 * s, iz);
+    levelRoot.add(b, chimney);
+  }
+}
+
+/* =====================================================================
    コース定義と切りかえ
    ===================================================================== */
 const COURSES = [
@@ -643,6 +786,25 @@ const COURSES = [
       { cp: 3, x0: -6, x1: 6, z0: 28.4, z1: 34, yMin: -1 },
     ],
     goal: { x0: -5, x1: 5, z0: 40.2, y: 3.6 },
+  },
+  {
+    name: '🏭 ドキドキ工場',
+    build: buildCourse3,
+    cam: { x: 4, z: 34, r: 40 },
+    checkpoints: [
+      { x: 0, y: 1.1, z: 1.5 },
+      { x: 0, y: 1.1, z: 20 },
+      { x: 0, y: 1.1, z: 44.5 },
+      { x: 0, y: 1.1, z: 59.5 },
+      { x: 0, y: 6.1, z: 68 },
+    ],
+    zones: [
+      { cp: 1, x0: -3.4, x1: 3.4, z0: 17.5, z1: 22.5, yMin: -1 },
+      { cp: 2, x0: -3.4, x1: 3.4, z0: 42.5, z1: 46.5, yMin: -1 },
+      { cp: 3, x0: -3.4, x1: 3.4, z0: 57.5, z1: 61.5, yMin: -1 },
+      { cp: 4, x0: -3.4, x1: 3.4, z0: 66.5, z1: 69.5, yMin: 4 },
+    ],
+    goal: { x0: -4, x1: 4, z0: 74.2, y: 8 },
   },
 ];
 let courseIdx = -1;
@@ -949,6 +1111,7 @@ function initPhysics() {
     body.allowSleep = !isKin && !o.rope && !o.hinge;
     body.sleepSpeedLimit = 0.3;
     body.sleepTimeLimit = 0.8;
+    if (o.spin !== undefined) { body.spin = o.spin; body.spinCenter = o.spinCenter; } // 回転床
     world.addBody(body);
     o.body = body;
 
@@ -991,6 +1154,8 @@ function initPhysics() {
   }
 }
 
+const smoothstep = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
+
 /* ギミックをうごかす（毎固定ステップ・ホストのみ） */
 function stepGimmicks() {
   // うごく足場
@@ -1012,6 +1177,68 @@ function stepGimmicks() {
     const tx = pd.pivot[0] + Math.sin(th) * pd.L;
     const ty = pd.pivot[1] - Math.cos(th) * pd.L;
     b.velocity.set((tx - b.position.x) / FIXED_DT, (ty - b.position.y) / FIXED_DT, (pd.pivot[2] - b.position.z) / FIXED_DT);
+  }
+  // キネマティック物を目標へ動かす（速度でうごかす＝上に乗った物ごと運べる）
+  const driveTo = (idx, ax, val) => {
+    const b = dynObjects[idx].body;
+    const cur = ax === 'x' ? b.position.x : ax === 'y' ? b.position.y : b.position.z;
+    const v = (val - cur) / FIXED_DT;
+    if (ax === 'x') b.velocity.set(v, 0, 0);
+    else if (ax === 'y') b.velocity.set(0, v, 0);
+    else b.velocity.set(0, 0, v);
+  };
+  // ピストン（横からドンとつき出す・当たると落とされる）
+  for (const p of GIM.pistons || []) {
+    const q = ((simT + p.phase) % p.period) / p.period;
+    // 大半はひっこんでいて、一瞬ドンと出る
+    const e = q < 0.5 ? Math.max(0, 1 - Math.abs(q - 0.22) / 0.13) : 0;
+    driveTo(p.idx, p.axis, p.base + p.reach * e * p.dir);
+  }
+  // プレス機（上からドスンと落ちてくる）
+  for (const c of GIM.crushers || []) {
+    const q = ((simT + c.phase) % c.period) / c.period;
+    let e; // 0=上, 1=下
+    if (q < 0.12) e = q / 0.12;            // すばやく落ちる
+    else if (q < 0.32) e = 1;              // 下でとどまる
+    else if (q < 0.6) e = 1 - (q - 0.32) / 0.28; // ゆっくり上がる
+    else e = 0;                            // 上でまつ
+    driveTo(c.idx, 'y', c.top - c.drop * e);
+  }
+  // エレベーター（上下する床・はしで乗りおりできるよう長めにとどまる）
+  for (const el of GIM.elevators || []) {
+    const q = ((simT + el.phase) % el.period) / el.period;
+    let e;
+    if (q < 0.15) e = 0;                                   // 下でまつ（のる）
+    else if (q < 0.45) e = smoothstep((q - 0.15) / 0.3);  // のぼる
+    else if (q < 0.65) e = 1;                             // 上でまつ（おりる）
+    else if (q < 0.95) e = 1 - smoothstep((q - 0.65) / 0.3); // おりる
+    else e = 0;
+    driveTo(el.idx, 'y', el.y0 + (el.y1 - el.y0) * e);
+  }
+  // 回転床（ターンテーブル）
+  for (const tt of GIM.turntables || []) {
+    dynObjects[tt.idx].body.angularVelocity.set(0, tt.omega, 0);
+  }
+  // 送風ファン（上昇気流ゾーン・入ると上へふきあげられる）
+  for (const uf of GIM.updrafts || []) {
+    for (const doll of dolls.values()) {
+      const p = doll.torso.position;
+      if (Math.abs(p.x - uf.x) < uf.rx && Math.abs(p.z - uf.z) < uf.rz && p.y > uf.y0 && p.y < uf.y1) {
+        const t = doll.torso;
+        t.force.y += t.mass * (-GRAVITY + uf.lift);         // 重力を打ち消して押し上げる
+        t.velocity.y = Math.min(t.velocity.y, uf.vmax);     // 上がりすぎない
+        t.force.x += -t.velocity.x * t.mass * 0.8;          // 中央にとどまりやすく
+        t.force.z += -t.velocity.z * t.mass * 0.8;
+      }
+    }
+    for (const o of dynObjects) { // 木箱などもふきあがる
+      if (!o.body || o.kinematic || o.hinge) continue;
+      const p = o.body.position;
+      if (Math.abs(p.x - uf.x) < uf.rx && Math.abs(p.z - uf.z) < uf.rz && p.y > uf.y0 && p.y < uf.y1) {
+        o.body.wakeUp();
+        o.body.force.y += o.body.mass * (-GRAVITY + uf.lift * 0.7);
+      }
+    }
   }
   // レバー → はねばし（一度ひらいたらそのまま）
   // ※ cannon-es のヒンジモーターは speed の符号が回転角と逆向きなので反転して使う
@@ -1266,8 +1493,17 @@ class Doll {
     const ray = new CANNON.RaycastResult();
     world.raycastClosest(from, to, { collisionFilterGroup: torso.collisionFilterGroup, collisionFilterMask: torso.collisionFilterMask, skipBackfaces: true }, ray);
     const grounded = ray.hasHit;
-    // ベルトコンベアの上では「地面の速度」がベルトのながれになる
-    const groundVel = grounded && ray.body ? (ray.body.beltVel || ray.body.velocity) : null;
+    // 地面の速度: ベルト=ながれ / 回転床=接線速度（乗った人を一緒にまわす） / それ以外=線速度
+    let groundVel = null;
+    if (grounded && ray.body) {
+      if (ray.body.spin !== undefined) {
+        const dx = torso.position.x - ray.body.spinCenter[0];
+        const dz = torso.position.z - ray.body.spinCenter[1];
+        groundVel = new CANNON.Vec3(-ray.body.spin * dz, 0, ray.body.spin * dx);
+      } else {
+        groundVel = ray.body.beltVel || ray.body.velocity;
+      }
+    }
     const hanging = this.grabbing;
 
     // ── 水: 体のしずんだ割合に応じた浮力（気絶中でもうく）
