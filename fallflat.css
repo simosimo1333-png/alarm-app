@@ -1,0 +1,144 @@
+/* ふにゃふにゃアスレチック */
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: "Hiragino Maru Gothic ProN", "BIZ UDGothic", "Yu Gothic", system-ui, sans-serif;
+  background: #87b9e7;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.hidden { display: none !important; }
+
+#wrap { position: fixed; inset: 0; }
+#game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* ===== メニューパネル ===== */
+#panel {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(92vw, 420px);
+  max-height: 92vh;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  border-radius: 20px;
+  padding: 22px 24px;
+  box-shadow: 0 12px 40px rgba(20, 50, 90, 0.35);
+  text-align: center;
+}
+#panel h1 { margin: 0 0 6px; font-size: 24px; color: #2b4a6f; }
+#panel .sub { margin: 0 0 14px; font-size: 13px; color: #5a728c; line-height: 1.6; }
+#panel .row {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-bottom: 12px;
+}
+#panel label { font-size: 14px; color: #2b4a6f; font-weight: bold; }
+#panel input {
+  font-size: 16px; padding: 8px 10px;
+  border: 2px solid #b8cde4; border-radius: 10px;
+  width: 150px; text-align: center; outline: none;
+}
+#panel input:focus { border-color: #4dabf7; }
+#panel button {
+  display: block; width: 100%;
+  font-size: 17px; font-weight: bold;
+  padding: 12px; margin: 8px 0;
+  border: none; border-radius: 12px;
+  cursor: pointer; color: #fff;
+  background: linear-gradient(135deg, #ff8a5c, #ff6b6b);
+  box-shadow: 0 4px 0 rgba(180, 60, 60, 0.5);
+  transition: transform 0.05s;
+}
+#panel button:active { transform: translateY(2px); box-shadow: none; }
+#panel .net-box {
+  margin-top: 12px; padding: 12px;
+  background: #eef5fc; border-radius: 14px;
+}
+#panel #host-btn { background: linear-gradient(135deg, #4dabf7, #3b82d6); box-shadow: 0 4px 0 rgba(40, 90, 150, 0.5); margin-top: 0; }
+#panel .join-row { display: flex; gap: 8px; align-items: center; }
+#panel .join-row input { flex: 1; width: auto; min-width: 0; letter-spacing: 4px; }
+#panel .join-row button {
+  flex: 1.2; margin: 0; font-size: 15px; padding: 10px;
+  background: linear-gradient(135deg, #51cf66, #37a94c); box-shadow: 0 4px 0 rgba(40, 110, 60, 0.5);
+}
+#net-status { min-height: 18px; margin-top: 8px; font-size: 13px; color: #d9480f; font-weight: bold; }
+#panel .help { font-size: 11px; color: #7a8ea3; line-height: 1.7; margin: 12px 0 0; }
+#panel .help a { color: #3b82d6; }
+
+/* ===== HUD ===== */
+#hud { position: absolute; inset: 0; pointer-events: none; }
+#hud-top {
+  position: absolute; top: 10px; left: 12px;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+}
+#hud-room {
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 10px; padding: 6px 12px;
+  font-size: 14px; color: #2b4a6f;
+}
+#hud-room b { font-size: 18px; letter-spacing: 3px; color: #d9480f; }
+#hud-players {
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 10px; padding: 6px 12px;
+  font-size: 13px; color: #2b4a6f;
+  display: flex; flex-direction: column; gap: 3px;
+}
+#hud-players .prow { display: flex; align-items: center; gap: 6px; }
+#hud-players .pdot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; border: 2px solid rgba(0,0,0,0.15); }
+#hud-msg {
+  position: absolute; top: 14%; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(43, 74, 111, 0.85);
+  color: #fff; font-size: 20px; font-weight: bold;
+  padding: 10px 26px; border-radius: 999px;
+  white-space: nowrap;
+  animation: msgpop 0.25s ease-out;
+}
+@keyframes msgpop { from { transform: translateX(-50%) scale(0.6); opacity: 0; } }
+#hud-btns {
+  position: absolute; top: 10px; right: 12px;
+  display: flex; gap: 8px; pointer-events: auto;
+}
+#hud-btns button {
+  font-size: 13px; font-weight: bold; color: #2b4a6f;
+  background: rgba(255, 255, 255, 0.85);
+  border: none; border-radius: 10px;
+  padding: 8px 12px; cursor: pointer;
+}
+#hud-btns button:active { background: #dbe7f3; }
+
+/* ===== タッチ操作 ===== */
+#touch { position: absolute; inset: 0; pointer-events: none; }
+#stick {
+  position: absolute; left: 24px; bottom: 28px;
+  width: 128px; height: 128px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  pointer-events: auto;
+}
+#stick-knob {
+  position: absolute; left: 50%; top: 50%;
+  width: 56px; height: 56px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.7);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+#tbtns {
+  position: absolute; right: 20px; bottom: 28px;
+  display: flex; gap: 14px; align-items: flex-end;
+  pointer-events: auto;
+}
+#tbtns button {
+  width: 76px; height: 76px; border-radius: 50%;
+  border: none; font-size: 24px; font-weight: bold;
+  color: #2b4a6f;
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+#tbtns button span { font-size: 10px; }
+#tbtns button.on { background: #ffd43b; }

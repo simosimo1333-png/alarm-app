@@ -737,3 +737,17 @@ h1 {
 .hidden {
   display: none !important;
 }
+
+/* べつのゲームへのリンク */
+.other-game {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+}
+.other-game a {
+  color: #6cc7d8;
+  text-decoration: none;
+  font-weight: bold;
+}
+.other-game a:hover {
+  text-decoration: underline;
+}
