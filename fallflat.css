@@ -93,6 +93,19 @@ html, body {
   border-color: #2b4a6f;
   transform: scale(1.2);
 }
+#panel #course-row { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
+#panel #course-row button {
+  display: inline-block; width: auto;
+  margin: 0; padding: 7px 13px;
+  font-size: 13px; font-weight: bold;
+  border-radius: 999px;
+  border: 2px solid #b8cde4;
+  background: #fff; color: #2b4a6f;
+  box-shadow: none;
+}
+#panel #course-row button.sel {
+  background: #ff8a5c; border-color: #ff8a5c; color: #fff;
+}
 #panel #hat-row { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
 #panel #hat-row button {
   display: inline-block; width: auto;
