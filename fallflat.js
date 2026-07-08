@@ -17,23 +17,26 @@ const SNAP_MS = 50;              // ホストの配信間隔 (20Hz)
 const INPUT_MS = 50;             // ゲストの入力送信間隔
 const INTERP_DELAY = 130;        // ゲスト側の補間遅延(ms)
 const PLAYER_COLORS = [0xff6b6b, 0x4dabf7, 0x51cf66, 0xffd43b, 0xb197fc];
+// コースはS字にまがりながら、高台→谷→塔と上下する
 const CHECKPOINTS = [
-  { x: 0, y: 1.1, z: 1 },    // 0 スタート広場
-  { x: 0, y: 1.1, z: 14 },   // 1 ぐらぐら板のさき
-  { x: 0, y: 1.1, z: 28.5 }, // 2 うごく足場のさき
-  { x: 0, y: 3.3, z: 38.5 }, // 3 高台（ロープのすきまの手前）
-  { x: 0, y: 3.3, z: 54.5 }, // 4 ふりこ鉄球のさき
-  { x: 0, y: 3.3, z: 71.5 }, // 5 ベルトコンベアのさき
+  { x: 0, y: 1.1, z: 1 },       // 0 スタート広場
+  { x: 0, y: 1.1, z: 14 },      // 1 ぐらぐら板のさき（ここで右へ）
+  { x: 13, y: 1.1, z: 12.8 },   // 2 うごく足場のさき・回転バーの島（ここで左へ）
+  { x: 16, y: 3.7, z: 29 },     // 3 高台（ロープのすきまの手前）
+  { x: 16, y: 3.7, z: 46.5 },   // 4 ふりこ鉄球のさき（ここで西へ）
+  { x: -5, y: 3.7, z: 45 },     // 5 ベルトコンベアのさき・とびおりポイント
+  { x: -6.5, y: 1.1, z: 65 },   // 6 谷のとびいしのさき
 ];
 // 通過するとチェックポイントが更新されるゾーン（島の上）
 const CP_ZONES = [
-  { cp: 1, z0: 12, z1: 22, yMin: -1 },
-  { cp: 2, z0: 27, z1: 35, yMin: -1 },
-  { cp: 3, z0: 35.5, z1: 41.5, yMin: 1.2 },
-  { cp: 4, z0: 53.5, z1: 56, yMin: 1.2 },
-  { cp: 5, z0: 70, z1: 76, yMin: 1.2 },
+  { cp: 1, x0: -6, x1: 6, z0: 12, z1: 22, yMin: -1 },
+  { cp: 2, x0: 10, x1: 21, z0: 11, z1: 23, yMin: -1 },
+  { cp: 3, x0: 12, x1: 20, z0: 27.5, z1: 33.5, yMin: 1.6 },
+  { cp: 4, x0: 12.5, x1: 19.5, z0: 45.2, z1: 48, yMin: 1.6 },
+  { cp: 5, x0: -10, x1: -3, z0: 41.5, z1: 48.5, yMin: 1.6 },
+  { cp: 6, x0: -10.5, x1: -2.5, z0: 63.5, z1: 69.5, yMin: -1 },
 ];
-const GOAL = { x: 4.5, z: 76.5, y: 5.5 }; // |x|<x かつ z> かつ y> でゴール
+const GOAL = { x0: -11, x1: -2, z0: 70.3, y: 3.8 }; // ゴール塔の上
 const IS_TOUCH = 'ontouchstart' in window;
 
 const LOCAL_NET = new URLSearchParams(location.search).has('local');
@@ -93,12 +96,12 @@ sun.position.set(-18, 34, 14);
 sun.castShadow = true;
 const shadowRes = IS_TOUCH ? 1024 : 2048;
 sun.shadow.mapSize.set(shadowRes, shadowRes);
-sun.shadow.camera.left = -55;
-sun.shadow.camera.right = 55;
-sun.shadow.camera.top = 65;
-sun.shadow.camera.bottom = -45;
-sun.shadow.camera.far = 130;
-sun.target.position.set(0, 0, 40);
+sun.shadow.camera.left = -60;
+sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 70;
+sun.shadow.camera.bottom = -50;
+sun.shadow.camera.far = 140;
+sun.target.position.set(4, 0, 38);
 scene.add(sun, sun.target);
 
 /* =====================================================================
@@ -152,6 +155,7 @@ function staticBox(w, h, d, x, y, z, mat, rotX = 0, opts = null) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
   if (rotX) m.rotation.x = rotX;
+  if (opts && opts.rotY) m.rotation.y = opts.rotY;
   m.receiveShadow = true;
   m.castShadow = true;
   scene.add(m);
@@ -217,69 +221,77 @@ function pennant(x, y, z, color) {
   scene.add(pole, flag);
 }
 
+// 壁こわし用などの大玉
+function bigBall(x, y, z) {
+  const r = 0.7;
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), MAT.ball);
+  m.position.set(x, y, z);
+  m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+  dynObjects.push({ mesh: m, kind: 'sphere', radius: r, mass: 6, home: { p: [x, y, z] }, body: null });
+}
+
 function buildLevelVisuals() {
-  // --- 島A: スタート広場 (z -2..8, 上面 y=0)
+  /* コースマップ（上から見た図・→は進行方向）
+       A(スタート) →+z→ B(木箱)  →+x→ C(回転バー) →+z→ D(高台 y2.6)
+       →ロープ→ E(ふりこ) →-x→ F(レンガ壁・とびら) →ベルト→ G(とびおり!)
+       →+z 落下→ H(谷 y0) →とびいし→ I(トランポリン) →大ジャンプ→ ゴール塔(y4.2) */
+
+  // --- 島A: スタート広場 (x -6..6, z -2..8, 上面 y=0)
   island(12, 10, 0, 0, 3);
   staticBox(12, 0.7, 0.4, 0, 0.35, -1.9, MAT.stone);          // うしろの柵
   staticBox(0.4, 0.7, 4, -5.8, 0.35, 0, MAT.stone);           // よこの柵
   staticBox(0.4, 0.7, 4, 5.8, 0.35, 0, MAT.stone);
   tree(-4.6, 6.5); tree(4.8, 1.2, 0, 0.8);
 
-  // --- すきま1 (z 8..12): シーソー板（動く板・落ちたら復活）
+  // --- すきま1 (z 8..12): ぐらぐら板
   dynBox(1.6, 0.12, 6.4, 0, 0.12, 10, MAT.wood, 3);
 
-  // --- 島B (z 12..22, 上面 y=0)
+  // --- 島B (x -6..6, z 12..22): 木箱と大玉。つきあたりを右へ→
   island(12, 10, 0, 0, 17);
   pennant(-2.2, 0, 14, 0x4dabf7);                             // チェックポイント1
-  // 木箱×3 と 大きいボール
   dynBox(0.8, 0.8, 0.8, -2.2, 0.5, 16.5, MAT.crate, 1.5);
   dynBox(0.8, 0.8, 0.8, -1.3, 0.5, 17.3, MAT.crate, 1.5);
   dynBox(0.8, 0.8, 0.8, -2.0, 1.4, 17.0, MAT.crate, 1.5);
-  {
-    const r = 0.7;
-    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), MAT.ball);
-    m.position.set(3, 1.2, 18.5);
-    m.castShadow = m.receiveShadow = true;
-    scene.add(m);
-    dynObjects.push({ mesh: m, kind: 'sphere', radius: r, mass: 6, home: { p: [3, 1.2, 18.5] }, body: null });
-  }
-  staticBox(3.2, 1.0, 1.6, 3.6, 0.5, 21, MAT.stone);          // のぼれる段差
+  bigBall(-3.5, 1.2, 19.5);
+  staticBox(12, 0.7, 0.4, 0, 0.35, 21.8, MAT.stone);          // つきあたりの柵（右へまがる）
+  staticBox(3.2, 1.0, 1.6, -2, 0.5, 20.4, MAT.stone);         // のぼれる段差
   tree(-4.8, 20.5, 0, 0.9);
 
-  // --- すきま2 (z 22..27): 左右にうごく足場
+  // --- すきま2 (x 6..10): 島のあいだをフェリーのように往復する足場
+  //     中央(x8)では両岸にとどく＝タイミングをあわせて乗りうつる
   {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(3, 0.3, 3.4), MAT.plat);
-    m.position.set(0, -0.15, 24.5);
-    m.castShadow = m.receiveShadow = true;
-    scene.add(m);
-    dynObjects.push({ mesh: m, kind: 'platform', size: [3, 0.3, 3.4], mass: 0, home: { p: [0, -0.15, 24.5] }, body: null });
+    const m = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.3, 3.6), MAT.plat);
+    m.receiveShadow = true;
+    const idx = kinObject(m, 'platform', [4.2, 0.3, 3.6], [8, -0.15, 17]);
+    GIM.platform = { idx, axis: 'x', base: 8, amp: 1.3, omega: 0.55 };
   }
 
-  // --- 島C (z 27..35, 上面 y=0): ぐるぐる回転バー
-  island(12, 8, 0, 0, 31);
-  pennant(2.4, 0, 28.2, 0x51cf66);                            // チェックポイント2
-  tree(-4.7, 29, 0, 0.85);
+  // --- 島C (x 10..21, z 11..23): ぐるぐる回転バー。おくを左へ→
+  island(11, 12, 15.5, 0, 17);
+  pennant(12.2, 0, 13, 0x51cf66);                             // チェックポイント2
+  staticBox(0.4, 0.7, 12, 20.8, 0.35, 17, MAT.stone);         // おくの柵（左へまがる）
+  tree(19.6, 12.4, 0, 0.85);
   {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 1.4, 10), MAT.stone);
-    pole.position.set(0, 0.7, 31.5);
+    pole.position.set(16, 0.7, 17);
     pole.castShadow = true;
     scene.add(pole);
     const bar = new THREE.Mesh(new THREE.BoxGeometry(7, 0.35, 0.35), MAT.plat);
-    GIM.sweeper = kinObject(bar, 'box', [7, 0.35, 0.35], [0, 0.6, 31.5]);
+    GIM.sweeper = kinObject(bar, 'box', [7, 0.35, 0.35], [16, 0.6, 17]);
   }
 
-  // --- スロープ → 高台D (上面 y=2.2, z 35.5..41.5)
-  staticBox(3, 0.3, 4.6, 0, 1.1, 33.5, MAT.wood, -Math.atan2(2.2, 4));
-  island(10, 6, 0, 2.2, 38.5);
-  pennant(-3.4, 2.2, 38.5, 0xffd43b);                         // チェックポイント3
+  // --- スロープ (z 23..27.5) → 高台D (x 12..20, z 27.5..33.5, 上面 y=2.6)
+  staticBox(3, 0.3, 5.2, 16, 1.3, 25.25, MAT.wood, -Math.atan2(2.6, 4.5));
+  island(8, 6, 16, 2.6, 30.5);
+  pennant(12.8, 2.6, 30.5, 0xffd43b);                         // チェックポイント3
 
-  // --- すきま3 (z 41.5..45.7): ターザンロープ or 細いはり
+  // --- すきま4 (z 33.5..38): ターザンロープ or 細いはり
   {
-    // アーチとロープ（さきっぽの玉をつかんでスイング！）
-    staticBox(0.5, 5.6, 0.5, -2.6, 2.2 + 2.8, 43.6, MAT.stone);
-    staticBox(0.5, 5.6, 0.5, 2.6, 2.2 + 2.8, 43.6, MAT.stone);
-    staticBox(5.7, 0.5, 0.5, 0, 2.2 + 5.85, 43.6, MAT.stone);
-    GIM.ropeAnchor = [0, 7.6, 43.6];
+    staticBox(0.5, 5.6, 0.5, 13.4, 2.6 + 2.8, 35.7, MAT.stone);
+    staticBox(0.5, 5.6, 0.5, 18.6, 2.6 + 2.8, 35.7, MAT.stone);
+    staticBox(5.7, 0.5, 0.5, 16, 2.6 + 5.85, 35.7, MAT.stone);
+    GIM.ropeAnchor = [16, 8.1, 35.7];
     GIM.ropeStart = dynObjects.length;
     GIM.ropeLen = 8;
     for (let i = 0; i < GIM.ropeLen; i++) {
@@ -288,97 +300,113 @@ function buildLevelVisuals() {
       const m = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), last ? MAT.ball : MAT.rope);
       m.castShadow = true;
       scene.add(m);
-      const p = [0, GIM.ropeAnchor[1] - 0.55 * (i + 1), 43.6];
+      const p = [16, GIM.ropeAnchor[1] - 0.55 * (i + 1), 35.7];
       m.position.set(...p);
       dynObjects.push({ mesh: m, kind: 'sphere', radius: r, mass: last ? 1.2 : 0.35, home: { p }, body: null, rope: true });
       addRod(i === 0 ? GIM.ropeAnchor : GIM.ropeStart + i - 1, GIM.ropeStart + i, 0.045, MAT.rope);
     }
     // 細いはり（こわい人むけの べつルート）
-    staticBox(0.6, 0.25, 5.4, 2, 2.2 - 0.13, 43.6, MAT.wood);
+    staticBox(0.6, 0.25, 5.4, 14, 2.6 - 0.13, 35.75, MAT.wood);
   }
 
-  // --- 島E (z 45.7..56, 上面 y=2.2): ふりこ鉄球の細い橋
-  island(6, 10.3, 0, 2.2, 50.85);
-  for (const [pz, phase] of [[49.3, 0], [52.6, Math.PI * 0.7]]) {
-    staticBox(0.5, 0.5, 0.5, 0, 8.2, pz, MAT.stone); // 支点
+  // --- 島E (x 12.5..19.5, z 38..48): ふりこ鉄球の橋
+  island(7, 10, 16, 2.6, 43);
+  for (const [pz, phase] of [[40.8, 0], [44.2, Math.PI * 0.7]]) {
+    staticBox(0.5, 0.5, 0.5, 16, 8.6, pz, MAT.stone); // 支点
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.62, 14, 10), MAT.iron);
-    const idx = kinObject(ball, 'sphere', 0.62, [0, 8.2 - 5.2, pz]);
-    GIM.pendulums.push({ idx, pivot: [0, 8.2, pz], L: 5.2, omega: 1.35, phase });
-    addRod([0, 8.2, pz], idx, 0.05, MAT.iron);
+    const idx = kinObject(ball, 'sphere', 0.62, [16, 8.6 - 5.2, pz]);
+    GIM.pendulums.push({ idx, pivot: [16, 8.6, pz], L: 5.2, omega: 1.35, phase });
+    addRod([16, 8.6, pz], idx, 0.05, MAT.iron);
   }
-  pennant(-2.2, 2.2, 54.8, 0xb197fc);                         // チェックポイント4
+  pennant(13.4, 2.6, 46.8, 0xb197fc);                         // チェックポイント4（ここから西へ）
 
-  // --- 島F (z 56..64, 上面 y=2.2): 大玉でこわすレンガ壁 → ボタンで開くとびら
-  island(12, 8, 0, 2.2, 60);
-  {
-    const r = 0.7; // 壁こわし用の大玉
-    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), MAT.ball);
-    m.position.set(-2.6, 3.2, 56.9);
-    m.castShadow = m.receiveShadow = true;
-    scene.add(m);
-    dynObjects.push({ mesh: m, kind: 'sphere', radius: r, mass: 6, home: { p: [-2.6, 3.2, 56.9] }, body: null });
-  }
-  // レンガ壁（中央のすきまをふさいでいる・押しくずせる）
-  staticBox(4.3, 2.4, 0.5, -3.85, 2.2 + 1.2, 58.4, MAT.stone);
-  staticBox(4.3, 2.4, 0.5, 3.85, 2.2 + 1.2, 58.4, MAT.stone);
+  // --- 島F (x 3..13, z 42..48, 上面 y=2.6): レンガ壁 → ボタンのとびら
+  island(10, 6, 8, 2.6, 45);
+  bigBall(11.6, 3.6, 43.2);
+  // レンガ壁（x=10.6・押しくずして西へすすむ）
+  staticBox(0.5, 2.4, 1.2, 10.6, 2.6 + 1.2, 42.6, MAT.stone);
+  staticBox(0.5, 2.4, 1.2, 10.6, 2.6 + 1.2, 47.4, MAT.stone);
   for (let row = 0; row < 4; row++) {
     for (let col = 0; col < 4; col++) {
-      const bw = 0.82, bh = 0.5;
-      const bx = -1.32 + col * 0.88 + (row % 2 ? 0.18 : -0.18);
-      const by = 2.2 + bh / 2 + row * (bh + 0.01);
-      const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.42), MAT.brick);
-      m.position.set(bx, by, 58.4);
+      const bd = 0.78, bh = 0.5;
+      const bz = 43.77 + col * 0.8 + (row % 2 ? 0.12 : -0.12);
+      const by = 2.6 + bh / 2 + row * (bh + 0.01);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.42, bh, bd), MAT.brick);
+      m.position.set(10.6, by, bz);
       m.castShadow = m.receiveShadow = true;
       scene.add(m);
-      dynObjects.push({ mesh: m, kind: 'box', size: [bw, bh, 0.42], mass: 0.7, home: { p: [bx, by, 58.4] }, body: null });
+      dynObjects.push({ mesh: m, kind: 'box', size: [0.42, bh, bd], mass: 0.7, home: { p: [10.6, by, bz] }, body: null });
     }
   }
-  // ボタンで開くとびら
-  staticBox(4.6, 2.8, 0.4, -3.75, 2.2 + 1.4, 61.6, MAT.stone);
-  staticBox(4.6, 2.8, 0.4, 3.75, 2.2 + 1.4, 61.6, MAT.stone);
+  // ボタンで開くとびら (x=6.8)
+  staticBox(0.4, 2.8, 1.5, 6.8, 2.6 + 1.4, 42.75, MAT.stone);
+  staticBox(0.4, 2.8, 1.5, 6.8, 2.6 + 1.4, 47.25, MAT.stone);
   {
-    const gate = new THREE.Mesh(new THREE.BoxGeometry(2.95, 2.5, 0.3), MAT.gate);
-    GIM.gate = kinObject(gate, 'box', [2.95, 2.5, 0.3], [0, 2.2 + 1.25, 61.6]);
-    GIM.gateHomeY = 2.2 + 1.25;
+    const gate = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.5, 2.95), MAT.gate);
+    GIM.gate = kinObject(gate, 'box', [0.3, 2.5, 2.95], [6.8, 2.6 + 1.25, 45]);
+    GIM.gateHomeY = 2.6 + 1.25;
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.68, 0.1, 14), MAT.stone);
-    base.position.set(2.5, 2.25, 60.2);
+    base.position.set(7.9, 2.65, 42.9);
     base.receiveShadow = true;
     scene.add(base);
     const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.5, 0.22, 14), MAT.button);
-    GIM.button = kinObject(cap, 'box', [0.9, 0.22, 0.9], [2.5, 2.2 + 0.19, 60.2]);
-    GIM.buttonPos = [2.5, 2.2, 60.2];
+    GIM.button = kinObject(cap, 'box', [0.9, 0.22, 0.9], [7.9, 2.6 + 0.19, 42.9]);
+    GIM.buttonPos = [7.9, 2.6, 42.9];
     GIM.opened = false;
   }
 
-  // --- ベルトコンベア橋 (z 64..70, ぎゃく方向にながれる！)
-  staticBox(3, 0.4, 6.6, 0, 2.0, 67, MAT.belt, 0, { belt: [0, 0, -2.3] });
-  staticBox(0.25, 0.32, 6.6, -1.62, 2.36, 67, MAT.stone);
-  staticBox(0.25, 0.32, 6.6, 1.62, 2.36, 67, MAT.stone);
+  // --- ベルトコンベア橋 (x -3.3..3.3, ながれは+x=ぎゃく方向！)
+  staticBox(3, 0.4, 6.6, 0, 2.4, 45, MAT.belt, 0, { belt: [2.3, 0, 0], rotY: Math.PI / 2 });
+  staticBox(6.6, 0.32, 0.25, 0, 2.76, 43.38, MAT.stone);
+  staticBox(6.6, 0.32, 0.25, 0, 2.76, 46.62, MAT.stone);
 
-  // --- 島G (z 70..76, 上面 y=2.2): トランポリンでゴールとうへ
-  island(10, 6, 0, 2.2, 73);
-  pennant(-3.4, 2.2, 71.3, 0x51cf66);                         // チェックポイント5
-  tree(-4.2, 74.5, 2.2, 0.8);
-  staticBox(2.4, 0.5, 2.4, 0, 2.01, 75, MAT.tram, 0, { bounce: 12 }); // 上面は床から6cmだけ出す
+  // --- 島G (x -10..-3, z 41.5..48.5, 上面 y=2.6): がけからとびおりる！
+  island(7, 7, -6.5, 2.6, 45);
+  pennant(-4.5, 2.6, 43, 0x51cf66);                           // チェックポイント5
+  tree(-9.2, 42.6, 2.6, 0.8);
 
-  // --- ゴールとう (上面 y=6, z 76.25..81.75)
-  island(9, 5.5, 0, 6, 79);
-  staticBox(4, 2.3, 4, 0, 3.25, 79, MAT.dirt); // とうの土台
-  // ゴールの旗
+  // --- 谷の島H (x -10.5..-2.5, z 49.5..56.5, 上面 y=0): とびおりた先
+  island(8, 7, -6.5, 0, 53);
+  tree(-9.6, 55.4, 0, 1.0);
+
+  // --- とびいし (高さのちがう石をジャンプでわたる・のぼって→おりる)
+  //     最初の石は島Hと重ねて段差に、以降は0.8〜0.9mの飛べるすきま
+  staticBox(2.2, 0.7, 2.4, -6.5, -0.05, 57.0, MAT.stone);  // 上面 y0.3（島Hと重なる段差）
+  staticBox(2.0, 1.8, 2.0, -6.5, 0.0, 60.0, MAT.stone);    // 上面 y0.9（のぼる）
+  staticBox(2.2, 1.0, 2.0, -6.5, 0.0, 62.9, MAT.stone);    // 上面 y0.5（おりて島Iへ）
+
+  // --- 島I (x -10.5..-2.5, z 63.5..69.5, 上面 y=0): トランポリンで大ジャンプ
+  island(8, 6, -6.5, 0, 66.5);
+  pennant(-9.2, 0, 65, 0x4dabf7);                             // チェックポイント6
+  staticBox(2.4, 0.5, 2.4, -6.5, -0.19, 68.3, MAT.tram, 0, { bounce: 13 }); // 上面は床から6cm
+
+  // --- ゴール塔 (x -11..-2, z 70.25..75.75, 上面 y=4.2)
+  island(9, 5.5, -6.5, 4.2, 73);
+  staticBox(5, 2.7, 4, -6.5, 1.3, 73, MAT.dirt); // 塔の土台
   {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.6, 10), MAT.stone);
-    pole.position.set(0, 6 + 1.3, 80);
+    pole.position.set(-6.5, 4.2 + 1.3, 74.3);
     pole.castShadow = true;
     const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.8), MAT.flag);
-    flag.position.set(0.7, 6 + 2.1, 80);
+    flag.position.set(-5.8, 4.2 + 2.1, 74.3);
     scene.add(pole, flag);
   }
 
+  // --- とおくのかざり島（見た目だけ・コースからは行けない）
+  for (const [ix, iy, iz, s] of [[30, -3, 8, 1.2], [-24, -5, 25, 1], [32, -4, 55, 0.9], [-22, -6, 70, 1.1]]) {
+    const g1 = new THREE.Mesh(new THREE.BoxGeometry(8 * s, 0.3, 6 * s), MAT.grass);
+    g1.position.set(ix, iy, iz);
+    const g2 = new THREE.Mesh(new THREE.BoxGeometry(8 * s, 1.3, 6 * s), MAT.dirt);
+    g2.position.set(ix, iy - 0.8, iz);
+    scene.add(g1, g2);
+    tree(ix + 2 * s, iz - s, iy + 0.15, s);
+  }
+
   // --- 雲と、下のほうの海色の板（奈落の見た目）
-  for (let i = 0; i < 11; i++) {
+  for (let i = 0; i < 12; i++) {
     const c = new THREE.Mesh(new THREE.SphereGeometry(1.6 + Math.random() * 1.6, 10, 7), MAT.cloud);
     c.scale.y = 0.4;
-    c.position.set((Math.random() - 0.5) * 80, 11 + Math.random() * 8, Math.random() * 95 - 8);
+    c.position.set(Math.random() * 90 - 40, 11 + Math.random() * 8, Math.random() * 85 - 8);
     scene.add(c);
   }
   const sea = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshBasicMaterial({ color: 0x7fb8e8 }));
@@ -528,7 +556,6 @@ class Rig {
 let world = null;
 let charMaterial, groundMaterial, handMaterial;
 let simT = 0;
-let platformBody = null;
 const GROUP_WORLD = 1, GROUP_OBJ = 2;
 const playerGroup = (idx) => 4 << idx; // idx 0..4 → bit 2..6
 
@@ -555,6 +582,7 @@ function initPhysics() {
       collisionFilterGroup: GROUP_WORLD,
     });
     if (s.rotX) body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), s.rotX);
+    if (s.rotY) body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), s.rotY);
     if (s.belt) body.beltVel = new CANNON.Vec3(...s.belt);      // ベルトコンベア
     if (s.bounce) body.bouncePad = s.bounce;                    // トランポリン
     world.addBody(body);
@@ -580,7 +608,6 @@ function initPhysics() {
     body.sleepTimeLimit = 0.8;
     world.addBody(body);
     o.body = body;
-    if (o.kind === 'platform') platformBody = body;
   }
 
   // ロープ: 天井アンカーから鎖状につなぐ
@@ -604,10 +631,13 @@ function initPhysics() {
 
 /* ギミックをうごかす（毎固定ステップ・ホストのみ） */
 function stepGimmicks() {
-  // 左右にうごく足場
-  if (platformBody) {
-    const nx = Math.sin(simT * 0.55) * 2.8;
-    platformBody.velocity.set((nx - platformBody.position.x) / FIXED_DT, 0, 0);
+  // うごく足場
+  if (GIM.platform) {
+    const pf = GIM.platform;
+    const b = dynObjects[pf.idx].body;
+    const target = pf.base + Math.sin(simT * pf.omega) * pf.amp;
+    if (pf.axis === 'z') b.velocity.set(0, 0, (target - b.position.z) / FIXED_DT);
+    else b.velocity.set((target - b.position.x) / FIXED_DT, 0, 0);
   }
   // ぐるぐる回転バー
   if (GIM.sweeper !== undefined) {
@@ -1296,13 +1326,13 @@ function hostStep(dt, now) {
     const p = doll.torso.position;
     if (p.y < FALL_Y) { doll.respawn(); continue; }
     for (const zn of CP_ZONES) {
-      if (zn.cp > doll.cp && p.z > zn.z0 && p.z < zn.z1 && p.y > zn.yMin && p.y < zn.yMin + 5) {
+      if (zn.cp > doll.cp && p.x > zn.x0 && p.x < zn.x1 && p.z > zn.z0 && p.z < zn.z1 && p.y > zn.yMin && p.y < zn.yMin + 5) {
         doll.cp = zn.cp;
         if (doll.id === myId) showMsg('🚩 チェックポイント！');
         else { const c = guests.get(doll.id); if (c) c.send({ t: 'm', text: '🚩 チェックポイント！' }); }
       }
     }
-    if (!doll.goal && Math.abs(p.x) < GOAL.x && p.z > GOAL.z && p.y > GOAL.y) {
+    if (!doll.goal && p.x > GOAL.x0 && p.x < GOAL.x1 && p.z > GOAL.z0 && p.y > GOAL.y) {
       doll.goal = true;
       const meta = metas.get(doll.id);
       meta.goal = true;
@@ -1422,8 +1452,8 @@ function updateCam() {
 
 function menuCam(now) {
   const t = now * 0.00012;
-  camera.position.set(Math.sin(t) * 34, 13, 38 + Math.cos(t) * 34);
-  camera.lookAt(0, 1.5, 38);
+  camera.position.set(5 + Math.sin(t) * 36, 14, 38 + Math.cos(t) * 36);
+  camera.lookAt(5, 1.5, 38);
 }
 
 /* ワイヤー・ロープの見た目を2点間に張りなおす（ホスト/ゲスト共通） */
@@ -1489,4 +1519,5 @@ window.__dbg = {
   releaseKey(code) { keys.delete(code); },
   jump() { jumpCount++; },
   setGrab(v) { keyGrab = v; },
+  setYaw(y) { camYaw = y; },
 };
