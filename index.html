@@ -2,11 +2,71 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="refresh" content="0; url=racing.html" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>カートレース</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a1a2e" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>" />
+  <title>ゲームをえらぶ</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: "Hiragino Maru Gothic ProN", "BIZ UDGothic", "Yu Gothic", system-ui, sans-serif;
+      background: linear-gradient(160deg, #1a1a2e, #16213e 55%, #0f3460);
+      color: #fff; min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 24px; text-align: center;
+    }
+    h1 { font-size: clamp(26px, 6vw, 44px); margin: 0 0 6px; letter-spacing: 1px; }
+    .lead { color: #b9c6dc; margin: 0 0 28px; font-size: clamp(13px, 3.4vw, 16px); }
+    .cards { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 760px; }
+    .card {
+      flex: 1 1 300px; max-width: 340px;
+      text-decoration: none; color: inherit;
+      background: rgba(255, 255, 255, 0.06);
+      border: 2px solid rgba(255, 255, 255, 0.12);
+      border-radius: 22px; padding: 28px 22px;
+      transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+      backdrop-filter: blur(4px);
+    }
+    .card:hover, .card:focus-visible {
+      transform: translateY(-6px);
+      border-color: rgba(255, 255, 255, 0.4);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+      outline: none;
+    }
+    .card .emoji { font-size: 68px; line-height: 1; display: block; margin-bottom: 12px; }
+    .card h2 { margin: 0 0 8px; font-size: clamp(20px, 4.5vw, 26px); }
+    .card p { margin: 0 0 16px; color: #cdd8ea; font-size: 13px; line-height: 1.6; min-height: 3.2em; }
+    .card .play {
+      display: inline-block; font-weight: bold; font-size: 15px;
+      padding: 10px 22px; border-radius: 999px; color: #fff;
+    }
+    .kart .emoji { filter: drop-shadow(0 4px 8px rgba(255, 120, 80, 0.5)); }
+    .kart .play { background: linear-gradient(135deg, #ff8a5c, #ff6b6b); }
+    .kart:hover { border-color: #ff8a5c; }
+    .fall .emoji { filter: drop-shadow(0 4px 8px rgba(80, 160, 255, 0.5)); }
+    .fall .play { background: linear-gradient(135deg, #4dabf7, #3b82d6); }
+    .fall:hover { border-color: #4dabf7; }
+    footer { margin-top: 30px; color: #6b7a92; font-size: 12px; }
+  </style>
 </head>
 <body>
-  <p><a href="racing.html">🏁 カートレースへ</a></p>
+  <h1>🎮 ゲームをえらぼう</h1>
+  <p class="lead">あそびたいゲームをタップしてね</p>
+  <div class="cards">
+    <a class="card kart" href="racing.html">
+      <span class="emoji">🏎️</span>
+      <h2>マリオカート</h2>
+      <p>コースを走ってゴールをめざす3Dレース。グランプリや対戦もあるよ。</p>
+      <span class="play">▶ あそぶ</span>
+    </a>
+    <a class="card fall" href="fallflat.html">
+      <span class="emoji">🧍</span>
+      <h2>ヒューマンフォールフラット</h2>
+      <p>ふにゃふにゃ人間をあやつるアスレチック。さいだい5人で協力プレイ！</p>
+      <span class="play">▶ あそぶ</span>
+    </a>
+  </div>
+  <footer>© あそびば</footer>
 </body>
 </html>
