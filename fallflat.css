@@ -13,6 +13,11 @@ html, body {
 }
 .hidden { display: none !important; }
 
+/* ダブルタップズームなどのブラウザ標準ジェスチャーを止める */
+#game, #touch, #stick, #stick-knob { touch-action: none; }
+#panel { touch-action: pan-y; }                 /* メニューはたてスクロールだけ許可 */
+button, input, a { touch-action: manipulation; } /* タップは効くがダブルタップズームは無効 */
+
 #wrap { position: fixed; inset: 0; }
 #game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
