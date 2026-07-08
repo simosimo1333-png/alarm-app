@@ -15,6 +15,8 @@ const FIXED_DT = 1 / 60;
 const FALL_Y = -8;               // 物がこれよりしずんだら持ち場へもどる
 const WATER_Y = -3.5;            // 海面の高さ（見た目のはいけい）
 const RESPAWN_Y = -2.4;          // これより落ちたらチェックポイントからやりなおし（海に落ちる前）
+const SKY_DROP = 13;             // 復帰するとき チェックポイントの上 このたかさの空から降ってくる
+const SKY_LIMP = 1.35;           // 降ってくるあいだラグドール（着地で起きあがる）
 const SNAP_MS = 50;              // ホストの配信間隔 (20Hz)
 const INPUT_MS = 50;             // ゲストの入力送信間隔
 const INTERP_DELAY = 130;        // ゲスト側の補間遅延(ms)
@@ -349,6 +351,17 @@ function addRod(fromPointOrIdx, toIdx, radius, mat) {
   GIM.rods.push({ mesh, from: fromPointOrIdx, toIdx });
 }
 
+// よじ登りかべ: 高さ topY のかべ。手前(-z)からジャンプしてふちに手をかけ、
+//   体をひきあげて のりこえる（本家風）。のぼると奥(+z)の床(perch)に立てる
+function climbWall(x, z, topY, w, mat = MAT.stone) {
+  staticBox(w, topY, 0.7, x, topY / 2, z, mat);                 // かべ本体
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(w * 0.96, 0.13, 0.16), MAT.flag); // てっぺんのグリップ
+  bar.position.set(x, topY, z - 0.36);
+  bar.castShadow = true;
+  levelRoot.add(bar);
+  staticBox(w, 0.4, 2.0, x, topY + 0.2, z + 1.0, mat);          // かべの上の床（奥がわ）
+}
+
 // ヒンジ（ちょうつがい）つきの板・とびら・レバーなど。index を返す
 // pivot: ヒンジのワールド座標 / localPivot: 板の中心から見たヒンジ位置 / angle0: 初期角度
 function hingedBox(w, h, d, mat, mass, pivot, localPivot, axis, angle0, opts = {}) {
@@ -439,7 +452,10 @@ function buildCourse1() {
   staticBox(4.5, 0.7, 0.4, 3.75, 0.35, -1.9, MAT.stone);
   staticBox(0.4, 0.7, 4, -5.8, 0.35, 0, MAT.stone);           // よこの柵
   staticBox(0.4, 0.7, 4, 5.8, 0.35, 0, MAT.stone);
-  tree(-4.6, 6.5); tree(4.8, 1.2, 0, 0.8);
+  tree(-4.6, 6.5);
+  // よじ登りのれんしゅう壁（上をむいて✊でつかみ、ジャンプ→ひきあげて のぼる）
+  climbWall(4.2, 6.2, 1.6, 2.6);
+  pennant(3.0, 1.6, 7.4, 0xff8fb3);                            // てっぺんの目じるし
 
   // --- すきま1 (z 8..12): ヒンジ式シーソー橋（中央支点でぎっこん）
   staticBox(0.6, 3, 0.6, 0, -1.4, 10, MAT.stone); // 支柱（上面 y0.1）
@@ -1555,12 +1571,12 @@ class Doll {
       this.sides.push({ sx, body: hand, grabC: null, holdC: null, cool: 0 });
     }
 
-    this.respawn();
+    this.place(false); // ゲーム開始時はチェックポイントに立って開始
   }
 
-  spawnPos() {
+  spawnPos(extraY = 0) {
     const cp = CHECKPOINTS[this.cp];
-    return new CANNON.Vec3(cp.x + ((this.id % MAX_PLAYERS) - 2) * 0.7, cp.y, cp.z);
+    return new CANNON.Vec3(cp.x + ((this.id % MAX_PLAYERS) - 2) * 0.7, cp.y + extraY, cp.z);
   }
 
   // 衝突音（連発しないようクールダウン。自分は直接・ほかのプレイヤーはそのゲストへ配信）
@@ -1571,19 +1587,31 @@ class Doll {
     else { const c = guests.get(this.id); if (c) c.send({ t: 'sfx', s: name }); }
   }
 
-  respawn() {
+  // sky=true でチェックポイントの高い空からラグドールで降ってくる（本家風）
+  place(sky) {
     this.releaseGrabs();
-    this.limpUntil = 0;
-    const p = this.spawnPos();
+    const p = this.spawnPos(sky ? SKY_DROP : 0);
     this.torso.position.copy(p);
     this.torso.velocity.setZero();
-    this.torso.angularVelocity.setZero();
     this.torso.quaternion.set(0, 0, 0, 1);
+    if (sky) {
+      // ラグドールでくるくる回りながら落ちてくる → 着地で起きあがる
+      this.torso.angularVelocity.set((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 3);
+      this.limpUntil = simT + SKY_LIMP;
+      this.airTime = 1;
+    } else {
+      this.torso.angularVelocity.setZero();
+      this.limpUntil = 0;
+      this.airTime = 0;
+    }
+    this.wetMsg = false;
     for (const s of this.sides) {
       s.body.position.set(p.x + 0.45 * s.sx, p.y, p.z);
       s.body.velocity.setZero();
     }
   }
+
+  respawn() { this.place(true); } // 落下・R復帰は空から降ってくる
 
   releaseSide(s) {
     if (s.grabC) { world.removeConstraint(s.grabC); s.grabC = null; }
@@ -1732,12 +1760,14 @@ class Doll {
       for (const s of this.sides) {
         if (!s.grabC || !s.holdC) continue;
         const hy = s.body.position.y;
-        if (hy > torso.position.y + 0.15) {          // 手が体よりはっきり上＝ふち・高所
-          s.holdC.distance = Math.max(0.3, s.holdC.distance - 3 * FIXED_DT);
-          torso.force.y += torso.mass * (-GRAVITY + 9); // ぐいっと上へ
-          torso.force.x += fx * torso.mass * 3.5;        // ふちの上へ前進
-          torso.force.z += fz * torso.mass * 3.5;
-          if (torso.position.y > hy - 0.2) this.releaseSide(s); // 乗ったら手をはなす
+        if (hy > torso.position.y + 0.05) {          // 手が体より上＝ふち・高所
+          s.holdC.distance = Math.max(0.3, s.holdC.distance - 2.5 * FIXED_DT);
+          // ふちの高さまで のぼる（のぼり速度を制限してロケットにしない）
+          if (torso.velocity.y < 3.0) torso.force.y += torso.mass * (-GRAVITY + 13);
+          torso.force.x += fx * torso.mass * 2.6;        // ふちの上へ前進して乗りこえる
+          torso.force.z += fz * torso.mass * 2.6;
+        } else if (s.grabC) {
+          this.releaseSide(s); // ふちの高さまで来た → 手をはなして のりこえる
         }
       }
     }
