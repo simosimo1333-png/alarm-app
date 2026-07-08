@@ -4,6 +4,7 @@ html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
   font-family: "Hiragino Maru Gothic ProN", "BIZ UDGothic", "Yu Gothic", system-ui, sans-serif;
   background: #87b9e7;
   touch-action: none;

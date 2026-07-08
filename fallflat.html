@@ -20,6 +20,7 @@
       </div>
       <div id="hud-msg" class="hidden"></div>
       <div id="hud-btns">
+        <button id="hud-fs" title="全画面">⛶</button>
         <button id="hud-respawn" title="リスポーン (R)">↺ もどる</button>
         <button id="hud-leave">メニュー</button>
       </div>
@@ -43,7 +44,8 @@
         <div id="net-status"></div>
       </div>
       <p class="help">
-        操作: WASD / 矢印 = 移動 ・ スペース = ジャンプ ・ マウス左長押し / Shift = 両手でつかむ ・ ドラッグ = カメラ ・ R = もどる
+        🖥️ WASD / 矢印 = 移動 ・ スペース = ジャンプ ・ マウス左長押し / Shift = 両手でつかむ ・ ドラッグ = カメラ ・ R = もどる<br />
+        📱 左スティック = 移動 ・ 右の✊⬆ボタン ・ 画面スワイプ = カメラ
       </p>
       <p class="help"><a href="racing.html">🏁 カートレースで遊ぶ</a></p>
     </div>
@@ -58,6 +60,8 @@
     </div>
   </div>
 
+  <!-- importmap非対応のふるいスマホブラウザ用ポリフィル -->
+  <script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
   <script type="importmap">
   {
     "imports": {
