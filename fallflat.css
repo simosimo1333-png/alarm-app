@@ -31,6 +31,13 @@ html, body {
   box-shadow: 0 12px 40px rgba(20, 50, 90, 0.35);
   text-align: center;
 }
+#panel { position: relative; }
+#menu-mute {
+  position: absolute; top: 12px; right: 12px;
+  width: auto !important; margin: 0 !important; padding: 4px 8px !important;
+  font-size: 20px !important; background: transparent !important;
+  box-shadow: none !important; border: none !important; cursor: pointer;
+}
 #panel h1 { margin: 0 0 6px; font-size: 24px; color: #2b4a6f; }
 #panel .sub { margin: 0 0 14px; font-size: 13px; color: #5a728c; line-height: 1.6; }
 #panel .row {

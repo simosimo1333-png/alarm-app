@@ -61,6 +61,120 @@ function getPlayerName() {
   return (nameInput.value || '').trim().slice(0, 8) || 'あなた';
 }
 
+/* =====================================================================
+   サウンド（Web Audio APIでその場合成・アセット不要）
+   ===================================================================== */
+const Sound = (() => {
+  let ctx = null, master = null, muted = false, ambient = null;
+  try { muted = localStorage.getItem('hff-muted') === '1'; } catch (e) { /* 保存なしでもOK */ }
+
+  function ensure() {
+    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = new AC();
+    master = ctx.createGain();
+    master.gain.value = muted ? 0 : 0.5;
+    master.connect(ctx.destination);
+  }
+  // 単音（エンベロープつき）
+  function tone(freq, dur, o = {}) {
+    const t0 = ctx.currentTime + (o.delay || 0);
+    const osc = ctx.createOscillator();
+    osc.type = o.type || 'sine';
+    osc.frequency.setValueAtTime(freq, t0);
+    if (o.glideTo) osc.frequency.exponentialRampToValueAtTime(o.glideTo, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(o.peak || 0.25, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g); g.connect(master);
+    osc.start(t0); osc.stop(t0 + dur + 0.02);
+  }
+  // ノイズ（ざらざら音・水しぶきや金属音に）
+  function noise(dur, o = {}) {
+    const t0 = ctx.currentTime + (o.delay || 0);
+    const n = Math.max(1, Math.floor(ctx.sampleRate * dur));
+    const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const f = ctx.createBiquadFilter();
+    f.type = o.filter || 'bandpass';
+    f.frequency.setValueAtTime(o.freq || 1000, t0);
+    f.Q.value = o.q || 1;
+    if (o.glideTo) f.frequency.exponentialRampToValueAtTime(o.glideTo, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(o.peak || 0.2, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(t0); src.stop(t0 + dur + 0.02);
+  }
+  const SFX = {
+    click: () => tone(660, 0.06, { type: 'triangle', peak: 0.13 }),
+    join: () => { tone(523, 0.1, { type: 'triangle', peak: 0.16 }); tone(784, 0.12, { type: 'triangle', peak: 0.16, delay: 0.08 }); },
+    jump: () => tone(300, 0.16, { type: 'sine', peak: 0.2, glideTo: 640 }),
+    grab: () => { noise(0.05, { peak: 0.1, filter: 'highpass', freq: 2200 }); tone(900, 0.04, { type: 'square', peak: 0.04 }); },
+    land: () => { tone(150, 0.13, { type: 'sine', peak: 0.26, glideTo: 68 }); noise(0.08, { peak: 0.1, filter: 'lowpass', freq: 420 }); },
+    splash: () => { noise(0.35, { peak: 0.24, filter: 'bandpass', freq: 1500, glideTo: 480, q: 0.7 }); tone(500, 0.18, { type: 'sine', peak: 0.06, glideTo: 200 }); },
+    checkpoint: () => { tone(784, 0.12, { type: 'triangle', peak: 0.2 }); tone(1175, 0.16, { type: 'triangle', peak: 0.2, delay: 0.1 }); },
+    goal: () => [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.32, { type: 'triangle', peak: 0.22, delay: i * 0.11 })),
+    gate: () => { tone(95, 0.3, { type: 'square', peak: 0.16, glideTo: 55 }); noise(0.28, { peak: 0.1, filter: 'lowpass', freq: 320 }); },
+    lever: () => { noise(0.03, { peak: 0.14, filter: 'highpass', freq: 1600 }); tone(220, 0.08, { type: 'square', peak: 0.08, delay: 0.05 }); },
+    catapult: () => { noise(0.42, { peak: 0.2, filter: 'bandpass', freq: 300, glideTo: 2600, q: 0.6 }); tone(200, 0.4, { type: 'sawtooth', peak: 0.06, glideTo: 900 }); },
+    thud: () => { tone(110, 0.16, { type: 'sine', peak: 0.28, glideTo: 55 }); noise(0.1, { peak: 0.12, filter: 'lowpass', freq: 300 }); },
+  };
+  const log = []; // 動作確認用: 鳴らそうとした音の記録
+  function play(name) {
+    log.push(name); if (log.length > 40) log.shift();
+    if (muted) return;
+    ensure();
+    if (!ctx || !SFX[name]) return;
+    try { SFX[name](); } catch (e) { /* 生成失敗は無視 */ }
+  }
+  // うっすら流れる環境音（コースごとにコードがちがう）
+  function startAmbient(course) {
+    if (muted) return;
+    ensure();
+    if (!ctx) return;
+    stopAmbient();
+    const chords = [[98, 147, 196], [110, 165, 247], [73, 110, 174]];
+    const base = chords[course] || chords[0];
+    const bus = ctx.createGain(); bus.gain.value = 0.0001; bus.connect(master);
+    const nodes = [];
+    base.forEach((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = i === 0 ? 'sine' : 'triangle';
+      o.frequency.value = f;
+      o.detune.value = (i - 1) * 5;
+      o.connect(bus); o.start();
+      nodes.push(o);
+    });
+    bus.gain.exponentialRampToValueAtTime(0.05, ctx.currentTime + 2.5);
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07;
+    const lg = ctx.createGain(); lg.gain.value = 0.02;
+    lfo.connect(lg); lg.connect(bus.gain); lfo.start();
+    nodes.push(lfo);
+    ambient = { bus, nodes };
+  }
+  function stopAmbient() {
+    if (!ambient || !ctx) { ambient = null; return; }
+    const a = ambient; ambient = null;
+    try {
+      a.bus.gain.cancelScheduledValues(ctx.currentTime);
+      a.bus.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+      setTimeout(() => a.nodes.forEach((n) => { try { n.stop(); } catch (e) { /* 停止ずみ */ } }), 500);
+    } catch (e) { /* 無視 */ }
+  }
+  function setMuted(m) {
+    muted = m;
+    try { localStorage.setItem('hff-muted', m ? '1' : '0'); } catch (e) { /* 無視 */ }
+    if (master) master.gain.value = m ? 0 : 0.5;
+    if (m) stopAmbient();
+  }
+  return { play, ensure, startAmbient, stopAmbient, setMuted, isMuted: () => muted, log };
+})();
+
 /* ===== なまえ・スキンの選択と保存 ===== */
 let mySkin = { c: 0, h: 0 };
 try {
@@ -1246,7 +1360,7 @@ function stepGimmicks() {
     const db = GIM.drawbridge;
     if (!db.open && Math.abs(hingeAngle(db.leverIdx)) > 0.35) {
       db.open = true;
-      announce('🌉 レバーをひいた！はねばしがおりる…');
+      announce('🌉 レバーをひいた！はねばしがおりる…', 'lever');
     }
     const th = hingeAngle(db.idx);
     const target = db.open ? 0 : db.upAngle;
@@ -1259,7 +1373,7 @@ function stepGimmicks() {
     if (simT > cp.readyAt && Math.abs(hingeAngle(cp.leverIdx)) > 0.35) {
       cp.fireAt = simT + 1.2;
       cp.readyAt = simT + 7;
-      announce('🎯 カタパルト はっしゃ 3・2・1…！');
+      announce('🎯 カタパルト はっしゃ 3・2・1…！', 'catapult');
     }
     const hinge = dynObjects[cp.idx].hingeC;
     if (cp.fireAt && simT >= cp.fireAt && simT < cp.fireAt + 0.55) {
@@ -1316,7 +1430,7 @@ function stepGimmicks() {
     pad.velocity.set(0, (padY - pad.position.y) * 6, 0);
     if (pressed && !wg.announced) {
       wg.announced = true;
-      announce('⚖️ おもみでとびらがひらいた！（はなれるとしまるよ）');
+      announce('⚖️ おもみでとびらがひらいた！（はなれるとしまるよ）', 'gate');
     }
   }
 
@@ -1327,7 +1441,7 @@ function stepGimmicks() {
         const p = doll.torso.position, bp = GIM.buttonPos;
         if (Math.abs(p.x - bp[0]) < 0.8 && Math.abs(p.z - bp[2]) < 0.8 && p.y > bp[1] && p.y < bp[1] + 1.4) {
           GIM.opened = true;
-          announce('🔴 ボタンをおした！とびらがひらく…');
+          announce('🔴 ボタンをおした！とびらがひらく…', 'gate');
           break;
         }
       }
@@ -1369,10 +1483,22 @@ function stepWater() {
   }
 }
 
-/* 全員へのおしらせ（ホストのみ呼ぶ） */
-function announce(text) {
+/* 全員へのおしらせ＋効果音（ホストのみ呼ぶ・全ゲストにとどく） */
+function announce(text, sound) {
   showMsg(text);
-  broadcast({ t: 'm', text });
+  if (sound) Sound.play(sound);
+  broadcast({ t: 'm', text, s: sound });
+}
+
+/* 特定プレイヤーだけへのおしらせ＋効果音（ホストのみ） */
+function tellDoll(doll, text, sound) {
+  if (doll.id === myId) {
+    if (text) showMsg(text);
+    if (sound) Sound.play(sound);
+  } else {
+    const c = guests.get(doll.id);
+    if (c) c.send({ t: 'm', text, s: sound });
+  }
 }
 
 /* ふにゃふにゃ人形（物理） */
@@ -1384,6 +1510,7 @@ class Doll {
     this.limpUntil = 0;
     this.lastJump = 0;
     this.wetMsg = false;
+    this.airTime = 0;
     this.input = { x: 0, z: 0, j: 0, gl: 0, gr: 0, ap: 0.35 };
 
     const grp = playerGroup(colorIdx);
@@ -1405,7 +1532,7 @@ class Doll {
     torso.dollId = id;
     torso.addEventListener('collide', (ev) => {
       const v = Math.abs(ev.contact.getImpactVelocityAlongNormal());
-      if (v > 9) this.limpUntil = simT + 1.1; // つよい衝撃でのびる
+      if (v > 9) { this.limpUntil = simT + 1.1; this.hitSound('thud'); } // つよい衝撃でのびる
     });
     world.addBody(torso);
     this.torso = torso;
@@ -1433,6 +1560,14 @@ class Doll {
   spawnPos() {
     const cp = CHECKPOINTS[this.cp];
     return new CANNON.Vec3(cp.x + ((this.id % MAX_PLAYERS) - 2) * 0.7, cp.y, cp.z);
+  }
+
+  // 衝突音（連発しないようクールダウン。自分は直接・ほかのプレイヤーはそのゲストへ配信）
+  hitSound(name, v) {
+    if (simT < (this.sndCool || 0)) return;
+    this.sndCool = simT + 0.16;
+    if (this.id === myId) Sound.play(name);
+    else { const c = guests.get(this.id); if (c) c.send({ t: 'sfx', s: name }); }
   }
 
   respawn() {
@@ -1505,6 +1640,14 @@ class Doll {
       }
     }
     const hanging = this.grabbing;
+
+    // 着地音（空中→接地の瞬間だけ・歩行中の接触では鳴らさない）
+    if (grounded) {
+      if (this.airTime > 0.28 && torso.position.y - 0.63 > WATER_Y) this.hitSound('land');
+      this.airTime = 0;
+    } else {
+      this.airTime += FIXED_DT;
+    }
 
     // ── 水: 体のしずんだ割合に応じた浮力（気絶中でもうく）
     const sub = Math.min(1, Math.max(0, (WATER_Y - (torso.position.y - 0.63)) / 1.26));
@@ -1610,8 +1753,8 @@ const stickVec = { x: 0, y: 0 };
 window.addEventListener('keydown', (e) => {
   if (state !== 'play' || e.repeat) { if (e.code === 'Space' && state === 'play') e.preventDefault(); return; }
   keys.add(e.code);
-  if (e.code === 'Space') { jumpCount++; e.preventDefault(); }
-  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keyGrab = true;
+  if (e.code === 'Space') { jumpCount++; Sound.play('jump'); e.preventDefault(); }
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { if (!keyGrab) Sound.play('grab'); keyGrab = true; }
   if (e.code === 'KeyR') requestRespawn();
 });
 window.addEventListener('keyup', (e) => {
@@ -1624,8 +1767,8 @@ window.addEventListener('blur', () => { keys.clear(); keyGrab = false; mouseGrab
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'touch') { touchCamStart(e); return; }
-  if (e.button === 0) mouseGrabL = true;
-  if (e.button === 2) mouseGrabR = true;
+  if (e.button === 0 && !mouseGrabL) { mouseGrabL = true; if (state === 'play') Sound.play('grab'); }
+  if (e.button === 2 && !mouseGrabR) { mouseGrabR = true; if (state === 'play') Sound.play('grab'); }
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -1682,8 +1825,8 @@ stickEl.addEventListener('pointercancel', stickEnd);
 
 // タッチボタン
 const tJump = $('t-jump'), tGrab = $('t-grab');
-tJump.addEventListener('pointerdown', (e) => { e.preventDefault(); jumpCount++; });
-tGrab.addEventListener('pointerdown', (e) => { e.preventDefault(); touchGrab = true; tGrab.classList.add('on'); });
+tJump.addEventListener('pointerdown', (e) => { e.preventDefault(); jumpCount++; Sound.play('jump'); });
+tGrab.addEventListener('pointerdown', (e) => { e.preventDefault(); touchGrab = true; tGrab.classList.add('on'); Sound.play('grab'); });
 const grabOff = () => { touchGrab = false; tGrab.classList.remove('on'); };
 tGrab.addEventListener('pointerup', grabOff);
 tGrab.addEventListener('pointercancel', grabOff);
@@ -1867,6 +2010,7 @@ function enterPlay() {
   hudEl.classList.remove('hidden');
   updatePlayersHud();
   showMsg('🚩 ゴールの旗をめざそう！ ✊つかむ で よじのぼり', 3600);
+  Sound.startAmbient(courseIdx);
 }
 
 function requestRespawn() {
@@ -1923,6 +2067,7 @@ function wireGuest(conn) {
       broadcast({ t: 'players', players: metaList() }, pid);
       updatePlayersHud();
       showMsg(`👋 ${name} が参加した！（${metas.size}/${MAX_PLAYERS}人）`);
+      Sound.play('join');
     } else if (m.t === 'i' && pid !== null) {
       const doll = dolls.get(pid);
       if (doll) {
@@ -1988,6 +2133,7 @@ function onGuestMsg(m) {
     hudCodeEl.textContent = roomCode;
     hudRoomEl.classList.remove('hidden');
     enterPlay();
+    Sound.play('join');
     inputTimer = setInterval(() => { if (hostConn) hostConn.send({ t: 'i', ...localInput() }); }, INPUT_MS);
   } else if (m.t === 'full') {
     netStatus('ルームは満員です（5人まで）');
@@ -2007,8 +2153,12 @@ function onGuestMsg(m) {
     if (metas.has(m.id)) metas.get(m.id).goal = true;
     updatePlayersHud();
     showMsg(`🎉 ${m.name} が ゴール！`, 3200);
+    Sound.play('goal');
   } else if (m.t === 'm') {
-    showMsg(m.text);
+    if (m.text) showMsg(m.text);
+    if (m.s) Sound.play(m.s);
+  } else if (m.t === 'sfx') {
+    Sound.play(m.s);
   } else if (m.t === 'bye') {
     hostGone();
   }
@@ -2038,10 +2188,27 @@ $('hud-fs').addEventListener('click', () => {
   }
 });
 
+/* ── サウンドON/OFF（メニューとHUDの両方） ── */
+function updateMuteButtons() {
+  const on = !Sound.isMuted();
+  for (const id of ['menu-mute', 'hud-mute']) {
+    const b = $(id);
+    if (b) b.textContent = on ? '🔊' : '🔇';
+  }
+}
+function toggleMute() {
+  Sound.setMuted(!Sound.isMuted());
+  if (!Sound.isMuted()) { Sound.play('click'); if (state === 'play') Sound.startAmbient(courseIdx); }
+  updateMuteButtons();
+}
+$('menu-mute').addEventListener('click', toggleMute);
+$('hud-mute').addEventListener('click', toggleMute);
+updateMuteButtons();
+
 /* ── メニューボタン ── */
-$('solo-btn').addEventListener('click', () => startHostGame(false));
-$('host-btn').addEventListener('click', () => startHostGame(true));
-$('join-btn').addEventListener('click', startJoin);
+$('solo-btn').addEventListener('click', () => { Sound.play('click'); startHostGame(false); });
+$('host-btn').addEventListener('click', () => { Sound.play('click'); startHostGame(true); });
+$('join-btn').addEventListener('click', () => { Sound.play('click'); startJoin(); });
 
 /* =====================================================================
    毎フレーム処理
@@ -2070,15 +2237,12 @@ function hostStep(dt, now) {
     if (p.y < -12) { doll.respawn(); continue; } // 万一 水面をつきぬけたら復帰
     if (!doll.wetMsg && p.y < WATER_Y + 0.4) {
       doll.wetMsg = true;
-      const txt = '🌊 水におちた！スロープまでおよいであがろう（R = もどる）';
-      if (doll.id === myId) showMsg(txt, 3800);
-      else { const c = guests.get(doll.id); if (c) c.send({ t: 'm', text: txt }); }
+      tellDoll(doll, '🌊 水におちた！スロープまでおよいであがろう（R = もどる）', 'splash');
     }
     for (const zn of CP_ZONES) {
       if (zn.cp > doll.cp && p.x > zn.x0 && p.x < zn.x1 && p.z > zn.z0 && p.z < zn.z1 && p.y > zn.yMin && p.y < zn.yMin + 5) {
         doll.cp = zn.cp;
-        if (doll.id === myId) showMsg('🚩 チェックポイント！');
-        else { const c = guests.get(doll.id); if (c) c.send({ t: 'm', text: '🚩 チェックポイント！' }); }
+        tellDoll(doll, '🚩 チェックポイント！', 'checkpoint');
       }
     }
     if (!doll.goal && p.x > GOAL.x0 && p.x < GOAL.x1 && p.z > GOAL.z0 && p.y > GOAL.y) {
@@ -2087,6 +2251,7 @@ function hostStep(dt, now) {
       meta.goal = true;
       updatePlayersHud();
       showMsg(`🎉 ${meta.name} が ゴール！`, 3200);
+      Sound.play('goal');
       broadcast({ t: 'goal', id: doll.id, name: meta.name });
     }
   }
@@ -2292,6 +2457,9 @@ window.__dbg = {
   get gim() { return GIM; },
   get skin() { return mySkin; },
   get course() { return courseIdx; },
+  get sndLog() { return Sound.log; },
+  clearSnd() { Sound.log.length = 0; },
+  muted() { return Sound.isMuted(); },
   hingeAngle,
   pos() {
     const rig = rigs.get(myId);
