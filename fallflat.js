@@ -1872,6 +1872,21 @@ tGrab.addEventListener('pointercancel', grabOff);
 
 if ('ontouchstart' in window) touchEl.classList.remove('hidden');
 
+// ダブルタップズームの防止（iOS Safari は user-scalable=no を無視するため保険）
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  // みじかい間かくの2回目のタップは、ボタン等の操作でなければ標準動作(ズーム)を止める
+  if (now - lastTouchEnd < 350 && !e.target.closest('button, input, a')) {
+    e.preventDefault();
+  }
+  lastTouchEnd = now;
+}, { passive: false });
+// ピンチや2本指ズームも止める（iOS）
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+}
+
 // カメラ基準のワールド移動ベクトルをつくる
 function localInput() {
   let ix = 0, iy = 0;
