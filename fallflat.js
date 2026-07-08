@@ -12,7 +12,8 @@ import * as CANNON from 'cannon-es';
 const MAX_PLAYERS = 5;
 const GRAVITY = -18;
 const FIXED_DT = 1 / 60;
-const FALL_Y = -8;               // これより落ちたらリスポーン
+const FALL_Y = -8;               // 物がこれよりしずんだら持ち場へもどる
+const WATER_Y = -3.5;            // 水面の高さ（落ちてもおよげる！）
 const SNAP_MS = 50;              // ホストの配信間隔 (20Hz)
 const INPUT_MS = 50;             // ゲストの入力送信間隔
 const INTERP_DELAY = 130;        // ゲスト側の補間遅延(ms)
@@ -213,6 +214,7 @@ function staticBox(w, h, d, x, y, z, mat, rotX = 0, opts = null) {
   m.position.set(x, y, z);
   if (rotX) m.rotation.x = rotX;
   if (opts && opts.rotY) m.rotation.y = opts.rotY;
+  if (opts && opts.rotZ) m.rotation.z = opts.rotZ;
   m.receiveShadow = true;
   m.castShadow = true;
   scene.add(m);
@@ -246,13 +248,13 @@ function island(w, d, x, topY, z) {
   staticBox(w, 1.3, d, x, topY - 0.3 - 0.65, z, MAT.dirt);
 }
 
-function dynBox(w, h, d, x, y, z, mat, mass) {
+function dynBox(w, h, d, x, y, z, mat, mass, buoy = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
   m.castShadow = true;
   m.receiveShadow = true;
   scene.add(m);
-  dynObjects.push({ mesh: m, kind: 'box', size: [w, h, d], mass, home: { p: [x, y, z] }, body: null });
+  dynObjects.push({ mesh: m, kind: 'box', size: [w, h, d], mass, buoy, home: { p: [x, y, z] }, body: null });
   return m;
 }
 
@@ -278,14 +280,14 @@ function pennant(x, y, z, color) {
   scene.add(pole, flag);
 }
 
-// 壁こわし用などの大玉
+// 壁こわし用などの大玉（水にうく）
 function bigBall(x, y, z) {
   const r = 0.7;
   const m = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), MAT.ball);
   m.position.set(x, y, z);
   m.castShadow = m.receiveShadow = true;
   scene.add(m);
-  dynObjects.push({ mesh: m, kind: 'sphere', radius: r, mass: 6, home: { p: [x, y, z] }, body: null });
+  dynObjects.push({ mesh: m, kind: 'sphere', radius: r, mass: 6, buoy: 1.15, home: { p: [x, y, z] }, body: null });
 }
 
 function buildLevelVisuals() {
@@ -296,20 +298,21 @@ function buildLevelVisuals() {
 
   // --- 島A: スタート広場 (x -6..6, z -2..8, 上面 y=0)
   island(12, 10, 0, 0, 3);
-  staticBox(12, 0.7, 0.4, 0, 0.35, -1.9, MAT.stone);          // うしろの柵
+  staticBox(4.5, 0.7, 0.4, -3.75, 0.35, -1.9, MAT.stone);     // うしろの柵（中央はレスキュースロープの出入り口）
+  staticBox(4.5, 0.7, 0.4, 3.75, 0.35, -1.9, MAT.stone);
   staticBox(0.4, 0.7, 4, -5.8, 0.35, 0, MAT.stone);           // よこの柵
   staticBox(0.4, 0.7, 4, 5.8, 0.35, 0, MAT.stone);
   tree(-4.6, 6.5); tree(4.8, 1.2, 0, 0.8);
 
-  // --- すきま1 (z 8..12): ぐらぐら板
-  dynBox(1.6, 0.12, 6.4, 0, 0.12, 10, MAT.wood, 3);
+  // --- すきま1 (z 8..12): ぐらぐら板（木なので水にうく）
+  dynBox(1.6, 0.12, 6.4, 0, 0.12, 10, MAT.wood, 3, 1.5);
 
   // --- 島B (x -6..6, z 12..22): 木箱と大玉。つきあたりを右へ→
   island(12, 10, 0, 0, 17);
   pennant(-2.2, 0, 14, 0x4dabf7);                             // チェックポイント1
-  dynBox(0.8, 0.8, 0.8, -2.2, 0.5, 16.5, MAT.crate, 1.5);
-  dynBox(0.8, 0.8, 0.8, -1.3, 0.5, 17.3, MAT.crate, 1.5);
-  dynBox(0.8, 0.8, 0.8, -2.0, 1.4, 17.0, MAT.crate, 1.5);
+  dynBox(0.8, 0.8, 0.8, -2.2, 0.5, 16.5, MAT.crate, 1.5, 1.35);
+  dynBox(0.8, 0.8, 0.8, -1.3, 0.5, 17.3, MAT.crate, 1.5, 1.35);
+  dynBox(0.8, 0.8, 0.8, -2.0, 1.4, 17.0, MAT.crate, 1.5, 1.35);
   bigBall(-3.5, 1.2, 19.5);
   staticBox(12, 0.7, 0.4, 0, 0.35, 21.8, MAT.stone);          // つきあたりの柵（右へまがる）
   staticBox(3.2, 1.0, 1.6, -2, 0.5, 20.4, MAT.stone);         // のぼれる段差
@@ -449,6 +452,12 @@ function buildLevelVisuals() {
     scene.add(pole, flag);
   }
 
+  // --- レスキュースロープ（水におちてもここからあがれる・3か所）
+  //     下端は水中ふかくまでのばし、およぎながらそのまま上がれるようにする
+  staticBox(3, 0.3, 13.6, 0, -2.5, -8.5, MAT.wood, -Math.atan2(5, 12.6));                 // スタート島のうしろ
+  staticBox(13.6, 0.3, 3, 27, -2.5, 17, MAT.wood, 0, { rotZ: -Math.atan2(5, 12.6) });     // 島C(回転バー)のひがし
+  staticBox(13.6, 0.3, 3, -16.7, -2.5, 53, MAT.wood, 0, { rotZ: Math.atan2(5, 12.6) });   // 谷の島Hのにし
+
   // --- とおくのかざり島（見た目だけ・コースからは行けない）
   for (const [ix, iy, iz, s] of [[30, -3, 8, 1.2], [-24, -5, 25, 1], [32, -4, 55, 0.9], [-22, -6, 70, 1.1]]) {
     const g1 = new THREE.Mesh(new THREE.BoxGeometry(8 * s, 0.3, 6 * s), MAT.grass);
@@ -466,11 +475,19 @@ function buildLevelVisuals() {
     c.position.set(Math.random() * 90 - 40, 11 + Math.random() * 8, Math.random() * 85 - 8);
     scene.add(c);
   }
-  const sea = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshBasicMaterial({ color: 0x7fb8e8 }));
-  sea.rotation.x = -Math.PI / 2;
-  sea.position.y = -26;
-  scene.add(sea);
+  // --- 水面（おちてもおよげる）と深い海の色
+  waterSurf = new THREE.Mesh(
+    new THREE.PlaneGeometry(500, 500),
+    new THREE.MeshLambertMaterial({ color: 0x4aa3d8, transparent: true, opacity: 0.78, side: THREE.DoubleSide }),
+  );
+  waterSurf.rotation.x = -Math.PI / 2;
+  waterSurf.position.y = WATER_Y;
+  const deep = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), new THREE.MeshBasicMaterial({ color: 0x2c6f9e }));
+  deep.rotation.x = -Math.PI / 2;
+  deep.position.y = WATER_Y - 6;
+  scene.add(waterSurf, deep);
 }
+let waterSurf = null;
 buildLevelVisuals();
 
 /* =====================================================================
@@ -608,8 +625,8 @@ class Rig {
     this.speedSm = 0;
   }
 
-  // p:Vector3ふう, q:Quaternionふう, hl/hr: [x,y,z]
-  setPose(p, q, hl, hr, grabbing, dt) {
+  // p:Vector3ふう, q:Quaternionふう, hl/hr: [x,y,z], grabMask: bit0=左手 bit1=右手
+  setPose(p, q, hl, hr, grabMask, dt) {
     const g = this.group;
     g.position.set(p.x, p.y, p.z);
     g.quaternion.set(q.x, q.y, q.z, q.w);
@@ -639,7 +656,7 @@ class Rig {
       arm.scale.set(1, len, 1);
       arm.quaternion.setFromUnitVectors(UP, dir.normalize());
       this.hands[i].position.copy(hp);
-      this.handMats[i].color.setHex(grabbing ? 0xffd43b : 0xffe8d1);
+      this.handMats[i].color.setHex((grabMask >> i) & 1 ? 0xffd43b : 0xffe8d1);
     }
 
     this.nameSpr.position.set(p.x, p.y + 1.35, p.z);
@@ -683,6 +700,7 @@ function initPhysics() {
     });
     if (s.rotX) body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), s.rotX);
     if (s.rotY) body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), s.rotY);
+    if (s.rotZ) body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), s.rotZ);
     if (s.belt) body.beltVel = new CANNON.Vec3(...s.belt);      // ベルトコンベア
     if (s.bounce) body.bouncePad = s.bounce;                    // トランポリン
     world.addBody(body);
@@ -772,6 +790,34 @@ function stepGimmicks() {
   }
 }
 
+/* 水にういた物の浮力（毎固定ステップ・ホストのみ） */
+function stepWater() {
+  for (const o of dynObjects) {
+    const b = o.body;
+    if (!o.buoy || !b) continue;
+    const h = o.size ? o.size[1] : o.radius * 2;
+    const bottom = b.position.y - h / 2;
+    if (bottom < WATER_Y) {
+      const s = Math.min(1, (WATER_Y - bottom) / Math.max(0.1, h));
+      b.wakeUp();
+      b.force.y += s * b.mass * -GRAVITY * o.buoy - b.velocity.y * b.mass * 0.9 * s;
+      b.force.x += -b.velocity.x * b.mass * 0.5 * s;
+      b.force.z += -b.velocity.z * b.mass * 0.5 * s;
+      // ながく浮きっぱなしの物は持ち場へもどす（コースの木箱をなくさない）
+      o.wet = (o.wet || 0) + FIXED_DT;
+      if (o.wet > 15) {
+        b.position.set(...o.home.p);
+        b.velocity.setZero();
+        b.angularVelocity.setZero();
+        b.quaternion.set(0, 0, 0, 1);
+        o.wet = 0;
+      }
+    } else if (o.wet) {
+      o.wet = 0;
+    }
+  }
+}
+
 /* 全員へのおしらせ（ホストのみ呼ぶ） */
 function announce(text) {
   showMsg(text);
@@ -786,8 +832,8 @@ class Doll {
     this.goal = false;
     this.limpUntil = 0;
     this.lastJump = 0;
-    this.grabCool = 0;
-    this.input = { x: 0, z: 0, j: 0, g: false };
+    this.wetMsg = false;
+    this.input = { x: 0, z: 0, j: 0, gl: 0, gr: 0, ap: 0.35 };
 
     const grp = playerGroup(colorIdx);
     const mask = ~grp;
@@ -827,7 +873,7 @@ class Doll {
       hand.allowSleep = false;
       hand.dollId = id;
       world.addBody(hand);
-      this.sides.push({ sx, body: hand, grabC: null, holdC: null });
+      this.sides.push({ sx, body: hand, grabC: null, holdC: null, cool: 0 });
     }
 
     this.respawn();
@@ -852,12 +898,14 @@ class Doll {
     }
   }
 
+  releaseSide(s) {
+    if (s.grabC) { world.removeConstraint(s.grabC); s.grabC = null; }
+    if (s.holdC) { world.removeConstraint(s.holdC); s.holdC = null; }
+    s.cool = simT + 0.22;
+  }
+
   releaseGrabs() {
-    for (const s of this.sides) {
-      if (s.grabC) { world.removeConstraint(s.grabC); s.grabC = null; }
-      if (s.holdC) { world.removeConstraint(s.holdC); s.holdC = null; }
-    }
-    this.grabCool = simT + 0.25;
+    for (const s of this.sides) this.releaseSide(s);
   }
 
   get grabbing() { return this.sides.some((s) => s.grabC); }
@@ -898,8 +946,15 @@ class Doll {
     const groundVel = grounded && ray.body ? (ray.body.beltVel || ray.body.velocity) : null;
     const hanging = this.grabbing;
 
+    // ── 水: 体のしずんだ割合に応じた浮力（気絶中でもうく）
+    const sub = Math.min(1, Math.max(0, (WATER_Y - (torso.position.y - 0.63)) / 1.26));
+    const swimming = sub > 0.3;
+    if (sub > 0) {
+      torso.force.y += sub * torso.mass * -GRAVITY * 1.6 - torso.velocity.y * 4 * sub;
+    }
+
     // トランポリン
-    if (grounded && ray.body.bouncePad && torso.velocity.y < 2) {
+    if (grounded && !swimming && ray.body.bouncePad && torso.velocity.y < 2) {
       torso.velocity.y = ray.body.bouncePad;
     }
 
@@ -923,9 +978,10 @@ class Doll {
         torso.torque.y += d * 22 - torso.angularVelocity.y * 4;
 
         const s = Math.min(1, mlen);
-        const tvx = gvx + (inp.x / mlen) * 4.2 * s;
-        const tvz = gvz + (inp.z / mlen) * 4.2 * s;
-        const k = grounded ? 0.18 : 0.045;
+        const spd = swimming ? 2.4 : 4.2;           // 水中はゆっくり
+        const tvx = gvx + (inp.x / mlen) * spd * s;
+        const tvz = gvz + (inp.z / mlen) * spd * s;
+        const k = grounded ? 0.18 : (swimming ? 0.06 : 0.045);
         torso.velocity.x += (tvx - torso.velocity.x) * k;
         torso.velocity.z += (tvz - torso.velocity.z) * k;
       } else {
@@ -934,36 +990,43 @@ class Doll {
           // 立ちどまるブレーキ（うごく床の速度にあわせる）
           torso.velocity.x += (gvx - torso.velocity.x) * 0.16;
           torso.velocity.z += (gvz - torso.velocity.z) * 0.16;
+        } else if (swimming) {
+          torso.velocity.x += -torso.velocity.x * 0.05;
+          torso.velocity.z += -torso.velocity.z * 0.05;
         }
       }
 
-      // ── ジャンプ（ぶらさがり中は手をはなして跳ぶ）
+      // ── ジャンプ（ぶらさがり中は手をはなして跳ぶ・水中はひとかき）
       if (inp.j !== this.lastJump) {
         this.lastJump = inp.j;
-        if (grounded) torso.velocity.y = 7.2;
+        if (grounded && !swimming) torso.velocity.y = 7.2;
         else if (hanging) { this.releaseGrabs(); torso.velocity.y = 6.2; }
+        else if (swimming) torso.velocity.y = Math.min(torso.velocity.y + 3.4, 4.5);
       }
     }
 
-    // ── うで（バネで目標位置へ・重力ぶんは打ち消す）
+    // ── うで（左右べつべつ・カメラの上下でうでの高さがかわる）
     for (const s of this.sides) {
       const hand = s.body;
-      const local = inp.g && !limp
-        ? new CANNON.Vec3(0.24 * s.sx, 0.5, 0.5)     // 上まえにのばす
-        : new CANNON.Vec3(0.42 * s.sx, -0.1, 0.06);  // 体のよこ
+      const grab = !limp && (s.sx < 0 ? inp.gl : inp.gr);
+      let local;
+      if (grab) {
+        const elev = Math.min(1.15, Math.max(-0.35, 0.75 - (Number.isFinite(+inp.ap) ? +inp.ap : 0.35)));
+        local = new CANNON.Vec3(0.24 * s.sx, Math.sin(elev) * 0.72, Math.cos(elev) * 0.72);
+      } else {
+        local = new CANNON.Vec3(0.42 * s.sx, -0.1, 0.06);  // 体のよこ
+      }
       const target = torso.pointToWorldFrame(local, new CANNON.Vec3());
       hand.force.x += (target.x - hand.position.x) * 32 - hand.velocity.x * 3;
       hand.force.y += (target.y - hand.position.y) * 32 - hand.velocity.y * 3 - GRAVITY * hand.mass;
       hand.force.z += (target.z - hand.position.z) * 32 - hand.velocity.z * 3;
-    }
 
-    // ── つかむ / はなす
-    if (inp.g && !limp) {
-      if (simT > this.grabCool) {
-        for (const s of this.sides) if (!s.grabC) this.tryGrab(s);
+      // ── つかむ / はなす（手ごとに独立 → 手わたりで登れる）
+      if (grab) {
+        if (!s.grabC && simT > s.cool) this.tryGrab(s);
+      } else if (s.grabC) {
+        this.releaseSide(s);
       }
-    } else if (this.grabbing) {
-      this.releaseGrabs();
     }
   }
 
@@ -979,7 +1042,7 @@ class Doll {
    ===================================================================== */
 const keys = new Set();
 let jumpCount = 0;
-let mouseGrab = false, keyGrab = false, touchGrab = false;
+let mouseGrabL = false, mouseGrabR = false, keyGrab = false, touchGrab = false;
 let camYaw = Math.PI, camPitch = 0.35, camDist = 6.5;
 const stickVec = { x: 0, y: 0 };
 
@@ -994,13 +1057,14 @@ window.addEventListener('keyup', (e) => {
   keys.delete(e.code);
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keyGrab = false;
 });
-window.addEventListener('blur', () => { keys.clear(); keyGrab = false; mouseGrab = false; });
+window.addEventListener('blur', () => { keys.clear(); keyGrab = false; mouseGrabL = false; mouseGrabR = false; });
 
-// マウス: 左長押し=つかむ / ドラッグ=カメラ
+// マウス: 左長押し=左手 / 右長押し=右手 / ドラッグ=カメラ
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'touch') { touchCamStart(e); return; }
-  if (e.button === 0) mouseGrab = true;
+  if (e.button === 0) mouseGrabL = true;
+  if (e.button === 2) mouseGrabR = true;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -1012,7 +1076,8 @@ canvas.addEventListener('pointermove', (e) => {
 });
 canvas.addEventListener('pointerup', (e) => {
   if (e.pointerType === 'touch') { touchCamEnd(e); return; }
-  if (e.button === 0) mouseGrab = false;
+  if (e.button === 0) mouseGrabL = false;
+  if (e.button === 2) mouseGrabR = false;
 });
 canvas.addEventListener('wheel', (e) => {
   camDist = Math.min(10, Math.max(3.5, camDist * (e.deltaY > 0 ? 1.1 : 0.9)));
@@ -1079,7 +1144,13 @@ function localInput() {
   let z = fz * iy + rz * ix;
   const len = Math.hypot(x, z);
   if (len > 1) { x /= len; z /= len; }
-  return { x: r2(x), z: r2(z), j: jumpCount, g: mouseGrab || keyGrab || touchGrab };
+  const both = keyGrab || touchGrab;
+  return {
+    x: r2(x), z: r2(z), j: jumpCount,
+    gl: (mouseGrabL || both) ? 1 : 0,   // 左手
+    gr: (mouseGrabR || both) ? 1 : 0,   // 右手
+    ap: r2(camPitch),                   // カメラの上下 → うでの高さ
+  };
 }
 
 /* =====================================================================
@@ -1292,7 +1363,13 @@ function wireGuest(conn) {
       showMsg(`👋 ${name} が参加した！（${metas.size}/${MAX_PLAYERS}人）`);
     } else if (m.t === 'i' && pid !== null) {
       const doll = dolls.get(pid);
-      if (doll) doll.input = { x: +m.x || 0, z: +m.z || 0, j: +m.j || 0, g: !!m.g };
+      if (doll) {
+        doll.input = {
+          x: +m.x || 0, z: +m.z || 0, j: +m.j || 0,
+          gl: m.gl ? 1 : 0, gr: m.gr ? 1 : 0,
+          ap: Number.isFinite(+m.ap) ? +m.ap : 0.35,
+        };
+      }
     } else if (m.t === 'rs' && pid !== null) {
       const doll = dolls.get(pid);
       if (doll) doll.respawn();
@@ -1418,15 +1495,22 @@ function hostStep(dt, now) {
   while (phyAcc >= FIXED_DT) {
     simT += FIXED_DT;
     stepGimmicks();
+    stepWater();
     for (const doll of dolls.values()) doll.control();
     world.step(FIXED_DT);
     phyAcc -= FIXED_DT;
   }
 
-  // 落下・チェックポイント・ゴール判定
+  // 落下・水・チェックポイント・ゴール判定
   for (const doll of dolls.values()) {
     const p = doll.torso.position;
-    if (p.y < FALL_Y) { doll.respawn(); continue; }
+    if (p.y < -12) { doll.respawn(); continue; } // 万一 水面をつきぬけたら復帰
+    if (!doll.wetMsg && p.y < WATER_Y + 0.4) {
+      doll.wetMsg = true;
+      const txt = '🌊 水におちた！スロープまでおよいであがろう（R = もどる）';
+      if (doll.id === myId) showMsg(txt, 3800);
+      else { const c = guests.get(doll.id); if (c) c.send({ t: 'm', text: txt }); }
+    }
     for (const zn of CP_ZONES) {
       if (zn.cp > doll.cp && p.x > zn.x0 && p.x < zn.x1 && p.z > zn.z0 && p.z < zn.z1 && p.y > zn.yMin && p.y < zn.yMin + 5) {
         doll.cp = zn.cp;
@@ -1463,7 +1547,7 @@ function hostStep(dt, now) {
       t.position, t.quaternion,
       [doll.sides[0].body.position.x, doll.sides[0].body.position.y, doll.sides[0].body.position.z],
       [doll.sides[1].body.position.x, doll.sides[1].body.position.y, doll.sides[1].body.position.z],
-      doll.input.g, dt,
+      (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0), dt,
     );
   }
   for (const o of dynObjects) {
@@ -1484,7 +1568,7 @@ function hostStep(dt, now) {
         r3(t.quaternion.x), r3(t.quaternion.y), r3(t.quaternion.z), r3(t.quaternion.w),
         r2(hl.x), r2(hl.y), r2(hl.z),
         r2(hr.x), r2(hr.y), r2(hr.z),
-        doll.input.g ? 1 : 0,
+        (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0),
       ]);
     }
     const o = dynObjects.map((ob) => [
@@ -1522,7 +1606,7 @@ function guestStep(now) {
       { x: px, y: py, z: pz }, _q1,
       [lerp(ea[8], eb[8], t), lerp(ea[9], eb[9], t), lerp(ea[10], eb[10], t)],
       [lerp(ea[11], eb[11], t), lerp(ea[12], eb[12], t), lerp(ea[13], eb[13], t)],
-      !!eb[14], dtRig,
+      eb[14] | 0, dtRig,
     );
   }
   for (let i = 0; i < dynObjects.length; i++) {
@@ -1616,6 +1700,7 @@ function animate(now) {
   }
   updateRods();
   beltTex.offset.y -= dt * 0.7; // ベルトのながれ
+  if (waterSurf) waterSurf.position.y = WATER_Y + Math.sin(now * 0.0011) * 0.05; // 水面のゆらぎ（見た目だけ）
   renderer.render(scene, camera);
 }
 requestAnimationFrame(animate);
@@ -1649,5 +1734,8 @@ window.__dbg = {
   releaseKey(code) { keys.delete(code); },
   jump() { jumpCount++; },
   setGrab(v) { keyGrab = v; },
+  setGrabL(v) { mouseGrabL = v; },
+  setGrabR(v) { mouseGrabR = v; },
+  setPitch(v) { camPitch = v; },
   setYaw(y) { camYaw = y; },
 };
