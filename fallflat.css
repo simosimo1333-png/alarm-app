@@ -67,6 +67,45 @@ html, body {
   background: linear-gradient(135deg, #51cf66, #37a94c); box-shadow: 0 4px 0 rgba(40, 110, 60, 0.5);
 }
 #net-status { min-height: 18px; margin-top: 8px; font-size: 13px; color: #d9480f; font-weight: bold; }
+
+/* スキン選択 */
+#panel .skin-box {
+  margin: 0 0 12px;
+  padding: 10px 8px;
+  background: #f2f7fd;
+  border-radius: 14px;
+}
+#panel .skin-title { font-size: 12px; font-weight: bold; color: #5a728c; margin-bottom: 8px; }
+#panel #color-row {
+  display: flex; justify-content: center; gap: 7px; flex-wrap: wrap;
+  margin-bottom: 9px;
+}
+#panel #color-row button {
+  display: inline-block; width: 30px; height: 30px;
+  margin: 0; padding: 0;
+  border-radius: 50%;
+  border: 3px solid rgba(0, 0, 0, 0.12);
+  box-shadow: none;
+  font-size: 0;
+  transition: transform 0.1s;
+}
+#panel #color-row button.sel {
+  border-color: #2b4a6f;
+  transform: scale(1.2);
+}
+#panel #hat-row { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
+#panel #hat-row button {
+  display: inline-block; width: auto;
+  margin: 0; padding: 6px 11px;
+  font-size: 12px; font-weight: bold;
+  border-radius: 999px;
+  border: 2px solid #b8cde4;
+  background: #fff; color: #2b4a6f;
+  box-shadow: none;
+}
+#panel #hat-row button.sel {
+  background: #4dabf7; border-color: #4dabf7; color: #fff;
+}
 #panel .help { font-size: 11px; color: #7a8ea3; line-height: 1.7; margin: 12px 0 0; }
 #panel .help a { color: #3b82d6; }
 

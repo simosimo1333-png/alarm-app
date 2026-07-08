@@ -16,7 +16,14 @@ const FALL_Y = -8;               // これより落ちたらリスポーン
 const SNAP_MS = 50;              // ホストの配信間隔 (20Hz)
 const INPUT_MS = 50;             // ゲストの入力送信間隔
 const INTERP_DELAY = 130;        // ゲスト側の補間遅延(ms)
-const PLAYER_COLORS = [0xff6b6b, 0x4dabf7, 0x51cf66, 0xffd43b, 0xb197fc];
+// スキン: 体の色 × ぼうし
+const SKIN_COLORS = [0xff6b6b, 0x4dabf7, 0x51cf66, 0xffd43b, 0xb197fc, 0xff9f43, 0x3bc9db, 0xf783ac];
+const HAT_NAMES = ['なし', 'ぼうし', 'かんむり', 'ねこみみ', 'ハット'];
+function normSkin(s) {
+  const c = s && Number.isFinite(+s.c) ? Math.min(SKIN_COLORS.length - 1, Math.max(0, Math.floor(+s.c))) : 0;
+  const h = s && Number.isFinite(+s.h) ? Math.min(HAT_NAMES.length - 1, Math.max(0, Math.floor(+s.h))) : 0;
+  return { c, h };
+}
 // コースはS字にまがりながら、高台→谷→塔と上下する
 const CHECKPOINTS = [
   { x: 0, y: 1.1, z: 1 },       // 0 スタート広場
@@ -68,6 +75,56 @@ function showMsg(text, ms = 2600) {
 function getPlayerName() {
   return (nameInput.value || '').trim().slice(0, 8) || 'あなた';
 }
+
+/* ===== なまえ・スキンの選択と保存 ===== */
+let mySkin = { c: 0, h: 0 };
+try {
+  const sv = JSON.parse(localStorage.getItem('hff-skin') || 'null');
+  if (sv) mySkin = normSkin(sv);
+  const nm = localStorage.getItem('hff-name');
+  if (nm) nameInput.value = nm.slice(0, 8);
+} catch (e) { /* プライベートモードなどでは保存なし */ }
+
+function saveProfile() {
+  try {
+    localStorage.setItem('hff-skin', JSON.stringify(mySkin));
+    localStorage.setItem('hff-name', getPlayerName());
+  } catch (e) { /* 同上 */ }
+}
+nameInput.addEventListener('change', () => { saveProfile(); refreshPreview(); });
+
+function buildSkinPicker() {
+  const colorRow = $('color-row');
+  SKIN_COLORS.forEach((col, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.style.background = '#' + col.toString(16).padStart(6, '0');
+    b.title = 'いろ ' + (i + 1);
+    if (i === mySkin.c) b.classList.add('sel');
+    b.addEventListener('click', () => {
+      mySkin.c = i;
+      [...colorRow.children].forEach((el, j) => el.classList.toggle('sel', j === i));
+      saveProfile();
+      refreshPreview();
+    });
+    colorRow.appendChild(b);
+  });
+  const hatRow = $('hat-row');
+  HAT_NAMES.forEach((nm, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = nm;
+    if (i === mySkin.h) b.classList.add('sel');
+    b.addEventListener('click', () => {
+      mySkin.h = i;
+      [...hatRow.children].forEach((el, j) => el.classList.toggle('sel', j === i));
+      saveProfile();
+      refreshPreview();
+    });
+    hatRow.appendChild(b);
+  });
+}
+buildSkinPicker();
 
 /* ===== Three.js セットアップ ===== */
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -445,9 +502,51 @@ function makeNameSprite(name, colorHex) {
   return spr;
 }
 
+// ぼうし（スキン）を頭にのせる
+function addHatTo(group, h, bodyColor) {
+  const g = new THREE.Group();
+  if (h === 1) { // ぼうし（キャップ）
+    const capMat = new THREE.MeshStandardMaterial({ color: 0x33548c, roughness: 0.7 });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.185, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
+    dome.position.set(0, 0.9, 0);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.16), capMat);
+    brim.position.set(0, 0.925, 0.22);
+    g.add(dome, brim);
+  } else if (h === 2) { // かんむり
+    const gold = new THREE.MeshStandardMaterial({ color: 0xf5c211, roughness: 0.35, metalness: 0.55 });
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.09, 12), gold);
+    band.position.set(0, 0.99, 0);
+    g.add(band);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.09, 6), gold);
+      spike.position.set(Math.cos(a) * 0.11, 1.07, Math.sin(a) * 0.11);
+      g.add(spike);
+    }
+  } else if (h === 3) { // ねこみみ
+    const earMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.7 });
+    for (const sx of [-1, 1]) {
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.15, 8), earMat);
+      ear.position.set(0.115 * sx, 0.97, 0);
+      ear.rotation.z = -0.3 * sx;
+      g.add(ear);
+    }
+  } else if (h === 4) { // シルクハット
+    const hatMat = new THREE.MeshStandardMaterial({ color: 0x2f2f3a, roughness: 0.5 });
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.025, 14), hatMat);
+    brim.position.set(0, 0.955, 0);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.24, 14), hatMat);
+    top.position.set(0, 1.08, 0);
+    g.add(brim, top);
+  }
+  g.traverse((m) => { m.castShadow = true; });
+  group.add(g);
+}
+
 class Rig {
-  constructor(colorIdx, name) {
-    const color = PLAYER_COLORS[colorIdx % PLAYER_COLORS.length];
+  constructor(skin, name) {
+    skin = normSkin(skin);
+    const color = SKIN_COLORS[skin.c];
     this.color = color;
     const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.65 });
     const skinMat = new THREE.MeshStandardMaterial({ color: 0xffe8d1, roughness: 0.7 });
@@ -468,6 +567,7 @@ class Rig {
       eye.position.set(0.075 * sx, 0.82, 0.185);
       this.group.add(eye);
     }
+    if (skin.h) addHatTo(this.group, skin.h, color);
 
     // あし（ひざなし・ふりこアニメ）
     this.legs = [];
@@ -1093,7 +1193,7 @@ let inputTimer = 0;
 let snaps = [];
 
 function metaList() {
-  return [...metas.values()].map((m) => ({ id: m.id, name: m.name, color: m.color, goal: m.goal }));
+  return [...metas.values()].map((m) => ({ id: m.id, name: m.name, skin: m.skin, goal: m.goal }));
 }
 
 function updatePlayersHud() {
@@ -1103,7 +1203,7 @@ function updatePlayersHud() {
     row.className = 'prow';
     const dot = document.createElement('span');
     dot.className = 'pdot';
-    dot.style.background = '#' + PLAYER_COLORS[m.color % PLAYER_COLORS.length].toString(16).padStart(6, '0');
+    dot.style.background = '#' + SKIN_COLORS[normSkin(m.skin).c].toString(16).padStart(6, '0');
     row.appendChild(dot);
     row.appendChild(document.createTextNode((m.goal ? '🏁 ' : '') + m.name + (m.id === myId ? '（あなた）' : '')));
     hudPlayersEl.appendChild(row);
@@ -1111,8 +1211,8 @@ function updatePlayersHud() {
 }
 
 function addMetaAndRig(m) {
-  metas.set(m.id, { ...m });
-  rigs.set(m.id, new Rig(m.color, m.name));
+  metas.set(m.id, { ...m, skin: normSkin(m.skin) });
+  rigs.set(m.id, new Rig(m.skin, m.name));
 }
 
 function removePlayer(id) {
@@ -1130,6 +1230,7 @@ function removePlayer(id) {
 
 function enterPlay() {
   state = 'play';
+  disposePreview();
   panelEl.classList.add('hidden');
   hudEl.classList.remove('hidden');
   updatePlayersHud();
@@ -1147,8 +1248,9 @@ function startHostGame(withRoom) {
   isHost = true;
   myId = 0;
   nextId = 1;
+  saveProfile();
   initPhysics();
-  addMetaAndRig({ id: 0, name: getPlayerName(), color: 0, goal: false });
+  addMetaAndRig({ id: 0, name: getPlayerName(), skin: mySkin, goal: false });
   dolls.set(0, new Doll(0, 0));
 
   if (withRoom) {
@@ -1180,10 +1282,9 @@ function wireGuest(conn) {
     if (m.t === 'join' && pid === null) {
       if (metas.size >= MAX_PLAYERS) { conn.send({ t: 'full' }); return; }
       pid = nextId++;
-      const colorIdx = pid % PLAYER_COLORS.length;
       const name = (m.name || '').slice(0, 8) || 'ゲスト' + pid;
-      addMetaAndRig({ id: pid, name, color: colorIdx, goal: false });
-      dolls.set(pid, new Doll(pid, colorIdx));
+      addMetaAndRig({ id: pid, name, skin: normSkin(m.skin), goal: false });
+      dolls.set(pid, new Doll(pid, pid % MAX_PLAYERS));
       guests.set(pid, conn);
       conn.send({ t: 'welcome', id: pid, players: metaList() });
       broadcast({ t: 'players', players: metaList() }, pid);
@@ -1221,12 +1322,13 @@ function broadcast(obj, exceptId = -1) {
 function startJoin() {
   const code = codeInput.value.trim();
   if (!/^\d{4}$/.test(code)) { netStatus('4けたのコードを入力してね'); return; }
+  saveProfile();
   roomCode = code;
   netStatus('接続中…');
   guestOpen(code, {
     onOpen: (conn) => {
       hostConn = conn;
-      conn.send({ t: 'join', name: getPlayerName() });
+      conn.send({ t: 'join', name: getPlayerName(), skin: mySkin });
     },
     onMsg: onGuestMsg,
     onClose: () => hostGone(),
@@ -1454,7 +1556,34 @@ function menuCam(now) {
   const t = now * 0.00012;
   camera.position.set(5 + Math.sin(t) * 36, 14, 38 + Math.cos(t) * 36);
   camera.lookAt(5, 1.5, 38);
+  updatePreview(now);
 }
+
+/* ===== メニューのスキンプレビュー（カメラの右前にういて回る） ===== */
+let previewRig = null;
+function refreshPreview() {
+  if (state !== 'menu') return;
+  if (previewRig) previewRig.dispose();
+  previewRig = new Rig(mySkin, getPlayerName());
+}
+function disposePreview() {
+  if (previewRig) { previewRig.dispose(); previewRig = null; }
+}
+const _pv1 = new THREE.Vector3(), _pv2 = new THREE.Vector3(), _pvQ = new THREE.Quaternion(), _pvM = new THREE.Matrix4();
+function updatePreview(now) {
+  if (!previewRig) return;
+  camera.updateMatrixWorld();
+  camera.getWorldDirection(_pv1);                       // 前方向
+  _pv2.crossVectors(_pv1, UP).normalize();              // 右方向
+  const pos = _pv1.multiplyScalar(4.2).add(camera.position).addScaledVector(_pv2, 2.1);
+  pos.y = camera.position.y - 2.1;
+  _pvQ.setFromAxisAngle(UP, now * 0.0012);              // ゆっくり回る
+  _pvM.compose(pos, _pvQ, new THREE.Vector3(1, 1, 1));
+  const hl = new THREE.Vector3(-0.45, -0.1, 0.05).applyMatrix4(_pvM);
+  const hr = new THREE.Vector3(0.45, -0.1, 0.05).applyMatrix4(_pvM);
+  previewRig.setPose(pos, _pvQ, [hl.x, hl.y, hl.z], [hr.x, hr.y, hr.z], false, 0);
+}
+refreshPreview();
 
 /* ワイヤー・ロープの見た目を2点間に張りなおす（ホスト/ゲスト共通） */
 const _rodV1 = new THREE.Vector3(), _rodV2 = new THREE.Vector3();
@@ -1511,6 +1640,7 @@ window.__dbg = {
   get snaps() { return snaps; },
   get objs() { return dynObjects; },
   get gim() { return GIM; },
+  get skin() { return mySkin; },
   pos() {
     const rig = rigs.get(myId);
     return rig ? rig.group.position.toArray() : null;
