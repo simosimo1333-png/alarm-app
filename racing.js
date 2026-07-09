@@ -1984,6 +1984,15 @@
   let countT = 0;
   let raceTime = 0;
   let finishOrder = [];
+  const remoteKarts = new Map(); // 対戦: pid → 相手カート
+  const netFinish = new Map();   // 対戦: pid → ゴールタイム
+  const KART_COLORS = [          // プレイヤーIDごとの色
+    { body: '#e94560', helmet: '#fff', fur: '#e8923c' }, // あか（マスコット）
+    { body: '#1e88e5', helmet: '#fff', fur: '#c7d2da' }, // あお
+    { body: '#43a047', helmet: '#ffd54f', fur: '#8a9a5b' }, // みどり
+    { body: '#fdd835', helmet: '#333', fur: '#d9b23f' }, // きいろ
+    { body: '#8e24aa', helmet: '#fff', fur: '#c9a6d6' }, // むらさき
+  ];
 
   const ITEM_ICONS = {
     boost: '🚀',
@@ -2113,19 +2122,32 @@
     wrongWayT = 0;
     finalLapShown = false;
     wrongwayEl.classList.add('hidden');
-    remoteTarget = null;
-    remoteFinish = null;
+    remoteKarts.clear();
+    netFinish.clear();
 
     const grid = N_WP - 8;
     if (vs) {
-      // 対戦: 自分と相手の2台。ホストが左、ゲストが右
-      const myLat = netRole === 'host' ? -22 : 22;
-      remoteKart = spawnKart({ name: remoteName || 'あいて', body: '#1e88e5', helmet: '#fff' }, grid, -myLat, false);
-      remoteKart.remote = true;
-      player = spawnKart({ name: getPlayerName(), body: '#e94560', helmet: '#fff', fur: PLAYER_FUR }, grid, myLat, true);
-      karts.push(remoteKart, player);
+      // 対戦: 参加者ぶんのカートを横にならべて出す（自分いがいは相手カート）
+      const n = Math.max(1, roster.length);
+      const half = (n - 1) / 2;
+      roster.forEach((r, i) => {
+        const lat = half === 0 ? 0 : ((i - half) / half) * 22;
+        const row = grid - (i % 2) * 5;             // 2列にずらして重なりを防ぐ
+        const col = KART_COLORS[r.pid % KART_COLORS.length];
+        const def = { name: r.name, body: col.body, helmet: col.helmet, fur: col.fur };
+        if (r.pid === myPid) {
+          player = spawnKart(def, row, lat, true);
+          karts.push(player);
+        } else {
+          const rk = spawnKart(def, row, lat, false);
+          rk.remote = true;
+          rk.pid = r.pid;
+          rk.netTarget = null;
+          remoteKarts.set(r.pid, rk);
+          karts.push(rk);
+        }
+      });
     } else {
-      remoteKart = null;
       karts.push(spawnKart(CPU_DEFS[0], grid + 4, -22, false));
       karts.push(spawnKart(CPU_DEFS[1], grid + 4, 22, false));
       karts.push(spawnKart(CPU_DEFS[2], grid, -22, false));
@@ -2443,7 +2465,7 @@
         x: k.x - Math.cos(k.a) * 42,
         y: k.y - Math.sin(k.a) * 42,
         arm: 0.6,
-        id: k.isPlayer && vsMode ? `${netRole}-${++netBananaSeq}` : null,
+        id: k.isPlayer && vsMode ? `${myPid}-${++netBananaSeq}` : null,
       };
       bananas.push(bn);
       if (k.isPlayer) {
@@ -2473,7 +2495,7 @@
         vy: Math.sin(k.a) * sp * dir,
         life: 2.5,
         owner: k,
-        id: k.isPlayer && vsMode ? `${netRole}-s${++netBananaSeq}` : null,
+        id: k.isPlayer && vsMode ? `${myPid}-s${++netBananaSeq}` : null,
       };
       shots.push(s);
       if (k.isPlayer) {
@@ -2488,7 +2510,7 @@
       lastZapT = raceTime;
       if (k.isPlayer && vsMode) {
         netSend({ t: 'zap' });
-        if (remoteKart) remoteKart.crashIcon = 'zap';
+        for (const rk of remoteKarts.values()) rk.crashIcon = 'zap';
       }
       for (const o of karts) {
         if (o === k || o.remote) continue; // 相手側は相手の画面で判定
@@ -2584,19 +2606,20 @@
 
   // 相手カートは受信した状態へなめらかに補間
   function lerpRemote(k, dt) {
-    if (remoteTarget) {
+    const t = k.netTarget;
+    if (t) {
       const f = Math.min(1, dt * 10);
-      k.x += (remoteTarget.x - k.x) * f;
-      k.y += (remoteTarget.y - k.y) * f;
-      let da = remoteTarget.a - k.a;
+      k.x += (t.x - k.x) * f;
+      k.y += (t.y - k.y) * f;
+      let da = t.a - k.a;
       while (da > Math.PI) da -= Math.PI * 2;
       while (da < -Math.PI) da += Math.PI * 2;
       k.a += da * f;
-      k.speed = remoteTarget.sp;
-    }
-    if (remoteTarget && remoteTarget.al !== undefined) {
-      k.alt += (remoteTarget.al - k.alt) * Math.min(1, dt * 10);
-      if (k.alt < 0.5 && remoteTarget.al === 0) k.alt = 0;
+      k.speed = t.sp;
+      if (t.al !== undefined) {
+        k.alt += (t.al - k.alt) * f;
+        if (k.alt < 0.5 && t.al === 0) k.alt = 0;
+      }
     }
     k.boost = Math.max(0, k.boost - dt);
     k.spin = Math.max(0, k.spin - dt);
@@ -3279,7 +3302,7 @@
   function showResults() {
     msgEl.textContent = '';
     const { rank, sorted } = rankOf(player);
-    const medals = ['🥇', '🥈', '🥉', '4.'];
+    const medals = ['🥇', '🥈', '🥉', '4.', '5.'];
     if (gpMode) {
       if (!gpAwarded) {
         gpAwarded = true;
@@ -3312,7 +3335,7 @@
     panelTitle.textContent = rank === 1 ? '🏆 グランプリ優勝！' : `グランプリ ${rank}位`;
     panelText.innerHTML = `全${COURSES.length}コースの合計ポイント`;
     resultsEl.innerHTML = entries
-      .map(([key, p], i) => `<div class="${key === '@p' ? 'me' : ''}">${['🥇', '🥈', '🥉', '4.'][i]} ${key === '@p' ? player.name : key} ― ${p}pt</div>`)
+      .map(([key, p], i) => `<div class="${key === '@p' ? 'me' : ''}">${['🥇', '🥈', '🥉', '4.', '5.'][i]} ${key === '@p' ? player.name : key} ― ${p}pt</div>`)
       .join('');
     startBtn.textContent = 'タイトルへ';
     beep(660, 0.15, 0.12, 'square');
@@ -3368,17 +3391,19 @@
     startRace();
   });
 
-  // ===== ふたりで対戦（ルームコードでP2P接続） =====
-  // 通常は PeerJS（WebRTC）。?local=1 で同一ブラウザのタブ同士
-  // （BroadcastChannel）に切り替わる（動作確認用・同じ端末の2窓対戦にも使える）
+  // ===== みんなで対戦（ルームコードでP2P・さいだい5人） =====
+  // ホストが全員の状態を中継する星形。通常は PeerJS（WebRTC）。
+  // ?local=1 で同一ブラウザのタブ同士（BroadcastChannel）に切り替わる。
   const LOCAL_NET = new URLSearchParams(location.search).has('local');
-  let net = null;          // {send, close}
-  let netRole = null;      // 'host' | 'guest'
+  const MAX_RACERS = 5;
   let vsMode = false;
-  let remoteKart = null;
-  let remoteTarget = null; // 相手の最新状態
-  let remoteFinish = null;
-  let remoteName = null;   // 相手のプレイヤー名
+  let isHost = false;
+  let myPid = 0;              // 自分のプレイヤーID（ホスト=0）
+  let roster = [];           // [{pid, name}] 参加者（自分ふくむ）
+  let hostConn = null;       // ゲスト: ホストへの接続 {send, close}
+  const guestConns = new Map(); // ホスト: pid → 接続
+  let netHandle = null;      // {close}
+  let nextPid = 1;           // ホストがゲストに割りあてる番号
   let netBananaSeq = 0;
   let lastNetSend = 0;
   let roomCode = null;
@@ -3386,24 +3411,29 @@
   const vsMenu = document.getElementById('vs-menu');
   const vsStatusEl = document.getElementById('vs-status');
   const vsCodeInput = document.getElementById('vs-code');
+  const vsStartBtn = document.getElementById('vs-start');
   function vsStatus(msg) { vsStatusEl.textContent = msg; }
 
+  function safeSend(conn, obj) { if (conn) { try { conn.send(obj); } catch (e) { /* 切断間際は無視 */ } } }
+
+  // from を付けて送信。ホスト→全ゲスト / ゲスト→ホスト
   function netSend(obj) {
-    if (vsMode && net) {
-      try { net.send(obj); } catch (e) { /* 切断間際は無視 */ }
-    }
+    if (!vsMode) return;
+    obj.from = myPid;
+    if (isHost) { for (const c of guestConns.values()) safeSend(c, obj); }
+    else safeSend(hostConn, obj);
+  }
+  function broadcast(obj, exceptPid) {
+    for (const [pid, c] of guestConns) if (pid !== exceptPid) safeSend(c, obj);
   }
 
   function leaveNet() {
-    if (net) {
-      try { net.send({ t: 'bye' }); } catch (e) { /* 切断済みなら無視 */ }
-      try { net.close(); } catch (e) { /* 同上 */ }
-    }
-    net = null;
-    netRole = null;
-    vsMode = false;
-    roomCode = null;
-    vsStatus('');
+    if (isHost) broadcast({ t: 'bye', from: myPid });
+    else safeSend(hostConn, { t: 'bye', from: myPid });
+    if (netHandle) { try { netHandle.close(); } catch (e) { /* 破棄済みなら無視 */ } }
+    netHandle = null; hostConn = null; guestConns.clear();
+    vsMode = false; isHost = false; roster = []; roomCode = null;
+    updateLobby();
   }
 
   function loadPeerJs() {
@@ -3417,114 +3447,202 @@
     });
   }
 
-  function openLocal(role, code, cbs) {
-    const bc = new BroadcastChannel('hida-kart-' + code);
-    const conn = {
-      send: (o) => bc.postMessage({ ...o, _r: role }),
-      close: () => bc.close(),
-    };
-    bc.onmessage = (ev) => {
-      if (ev.data && ev.data._r !== role) cbs.onMsg(ev.data);
-    };
-    setTimeout(() => cbs.onOpen(conn), 30);
-  }
-
-  function openPeer(role, code, cbs) {
-    loadPeerJs().then(() => {
-      const id = 'hida-kart-' + code;
-      const peer = new Peer(role === 'host' ? id : undefined);
-      const wire = (c) => {
-        c.on('open', () => cbs.onOpen({
-          send: (o) => c.send(o),
-          close: () => { try { c.close(); } catch (e) {} try { peer.destroy(); } catch (e) {} },
-        }));
-        c.on('data', cbs.onMsg);
-        c.on('close', cbs.onClose);
+  // ── ホスト側トランスポート hooks {onReady(code), onConn(conn), onError(type)}
+  function openHost(code, hooks) {
+    if (LOCAL_NET) {
+      const bc = new BroadcastChannel('hida-kart-' + code);
+      const conns = new Map();
+      bc.onmessage = (ev) => {
+        const { from, to, d } = ev.data || {};
+        if (to !== 'H' || !from) return;
+        let c = conns.get(from);
+        if (!c) {
+          c = { send: (o) => bc.postMessage({ from: 'H', to: from, d: o }), close: () => {}, onMsg: null, onClose: null };
+          conns.set(from, c);
+          hooks.onConn(c);
+        }
+        if (d && c.onMsg) c.onMsg(d);
       };
-      peer.on('error', (e) => {
-        if (e.type === 'peer-unavailable') vsStatus('そのコードのルームが見つかりません');
-        else if (e.type === 'unavailable-id') vsStatus('コードが使用中です。もう一度作成してください');
-        else vsStatus('接続エラーが発生しました（' + e.type + '）');
+      netHandle = { close: () => bc.close() };
+      setTimeout(() => hooks.onReady(code), 30);
+      return;
+    }
+    loadPeerJs().then(() => {
+      const peer = new Peer('hida-kart-' + code);
+      peer.on('open', () => hooks.onReady(code));
+      peer.on('connection', (c) => {
+        const conn = {
+          send: (o) => { try { c.send(o); } catch (e) { /* 無視 */ } },
+          close: () => { try { c.close(); } catch (e) { /* 無視 */ } },
+          onMsg: null, onClose: null,
+        };
+        c.on('data', (d) => { if (conn.onMsg) conn.onMsg(d); });
+        c.on('close', () => { if (conn.onClose) conn.onClose(); });
+        hooks.onConn(conn);
       });
-      if (role === 'host') {
-        peer.on('connection', wire);
-      } else {
-        peer.on('open', () => wire(peer.connect(id, { reliable: false })));
-      }
-    }).catch(() => vsStatus('通信ライブラリを読み込めませんでした'));
+      peer.on('error', (e) => hooks.onError(e.type));
+      netHandle = { close: () => { try { peer.destroy(); } catch (e) { /* 無視 */ } } };
+    }).catch(() => hooks.onError('load'));
   }
 
-  function startNet(role) {
+  // ── ゲスト側トランスポート hooks {onOpen(conn), onMsg(d), onClose, onError(type)}
+  function openGuest(code, hooks) {
+    if (LOCAL_NET) {
+      const uid = Math.random().toString(36).slice(2, 8);
+      const bc = new BroadcastChannel('hida-kart-' + code);
+      const conn = { send: (o) => { try { bc.postMessage({ from: uid, to: 'H', d: o }); } catch (e) { /* 無視 */ } }, close: () => bc.close() };
+      bc.onmessage = (ev) => { const { from, to, d } = ev.data || {}; if (to === uid && from === 'H') hooks.onMsg(d); };
+      netHandle = { close: () => bc.close() };
+      setTimeout(() => hooks.onOpen(conn), 30);
+      return;
+    }
+    loadPeerJs().then(() => {
+      const peer = new Peer();
+      peer.on('open', () => {
+        const c = peer.connect('hida-kart-' + code, { reliable: true });
+        c.on('open', () => hooks.onOpen({
+          send: (o) => { try { c.send(o); } catch (e) { /* 無視 */ } },
+          close: () => { try { c.close(); } catch (e) { /* 無視 */ } try { peer.destroy(); } catch (e) { /* 無視 */ } },
+        }));
+        c.on('data', hooks.onMsg);
+        c.on('close', hooks.onClose);
+      });
+      peer.on('error', (e) => hooks.onError(e.type));
+      netHandle = { close: () => { try { peer.destroy(); } catch (e) { /* 無視 */ } } };
+    }).catch(() => hooks.onError('load'));
+  }
+
+  function updateLobby() {
+    if (!roomCode) { vsStartBtn.classList.add('hidden'); return; }
+    if (isHost) {
+      const names = roster.map((r) => r.name).join('・');
+      vsStatus(`コード「${roomCode}」を伝えてね（${roster.length}/${MAX_RACERS}人）\n${names}`);
+      vsStartBtn.classList.toggle('hidden', roster.length < 2);
+      vsStartBtn.textContent = `スタート！（${roster.length}人）`;
+    } else {
+      vsStartBtn.classList.add('hidden');
+    }
+  }
+
+  // ── ホストになる ──
+  function startHost() {
     leaveNet();
-    netRole = role;
-    const code = role === 'host'
-      ? String(1000 + Math.floor(Math.random() * 9000))
-      : vsCodeInput.value.trim();
-    if (!/^\d{4}$/.test(code)) { vsStatus('4けたのコードを入力してね'); return; }
-    roomCode = code;
-    vsStatus(role === 'host'
-      ? `コード「${code}」を友だちに伝えてね。参加を待っています…`
-      : '接続中…');
-    const cbs = {
-      onOpen: (conn) => {
-        net = conn;
-        if (role === 'guest') net.send({ t: 'join', name: getPlayerName() });
-      },
-      onMsg: onNetMsg,
-      onClose: onNetClosed,
-    };
-    (LOCAL_NET ? openLocal : openPeer)(role, code, cbs);
+    isHost = true;
+    myPid = 0;
+    nextPid = 1;
+    roster = [{ pid: 0, name: getPlayerName() }];
+    roomCode = String(1000 + Math.floor(Math.random() * 9000));
+    vsStatus('ルームを準備中…');
+    openHost(roomCode, {
+      onReady: () => updateLobby(),
+      onConn: (conn) => wireGuest(conn),
+      onError: (type) => vsStatus(type === 'unavailable-id' ? 'コードが使用中です。もう一度作成してください' : '接続エラー（' + type + '）'),
+    });
   }
 
-  function onNetMsg(m) {
+  // ホストがゲスト接続を受けもつ
+  function wireGuest(conn) {
+    let pid = null;
+    conn.onMsg = (m) => {
+      if (!m || !m.t) return;
+      if (m.t === 'join' && pid === null) {
+        if (vsMode || roster.length >= MAX_RACERS) { safeSend(conn, { t: 'full' }); return; }
+        pid = nextPid++;
+        roster.push({ pid, name: (m.name || '').slice(0, 8) || 'プレイヤー' + pid });
+        guestConns.set(pid, conn);
+        safeSend(conn, { t: 'welcome', id: pid, roster });
+        broadcast({ t: 'roster', roster }, pid);
+        updateLobby();
+      } else if (pid !== null) {
+        if (m.t === 'bye') { dropGuest(); return; }
+        handleGameMsg(m);          // ホスト自身にも反映
+        broadcast(m, pid);         // ほかのゲストへ中継
+      }
+    };
+    conn.onClose = () => dropGuest();
+    function dropGuest() {
+      if (pid === null) return;
+      const rk = remoteKarts.get(pid);
+      if (rk) { const i = karts.indexOf(rk); if (i >= 0) karts.splice(i, 1); remoteKarts.delete(pid); }
+      roster = roster.filter((r) => r.pid !== pid);
+      guestConns.delete(pid);
+      broadcast({ t: 'roster', roster });
+      updateLobby();
+      pid = null;
+    }
+  }
+
+  // ── ゲストになる ──
+  function startJoin() {
+    leaveNet();
+    const code = vsCodeInput.value.trim();
+    if (!/^\d{4}$/.test(code)) { vsStatus('4けたのコードを入力してね'); return; }
+    isHost = false;
+    roomCode = code;
+    vsStatus('接続中…');
+    openGuest(code, {
+      onOpen: (conn) => { hostConn = conn; safeSend(conn, { t: 'join', name: getPlayerName() }); },
+      onMsg: onGuestMsg,
+      onClose: () => hostGone(),
+      onError: (type) => vsStatus(type === 'peer-unavailable' ? 'そのコードのルームが見つかりません' : '接続エラー（' + type + '）'),
+    });
+  }
+
+  function onGuestMsg(m) {
     if (!m || !m.t) return;
-    if (m.t === 'join' && netRole === 'host' && !vsMode) {
-      remoteName = (m.name || '').slice(0, 8) || 'あいて';
-      netSendRaw({ t: 'start', course: courseIdx, seed: courseSeed, name: getPlayerName() });
-      beginVersus();
-    } else if (m.t === 'start' && netRole === 'guest' && !vsMode) {
-      remoteName = (m.name || '').slice(0, 8) || 'あいて';
+    if (m.t === 'welcome') {
+      myPid = m.id;
+      roster = m.roster;
+      vsStatus(`さんかしました！ホストのスタートを待ってね（${roster.length}人）`);
+    } else if (m.t === 'roster') {
+      roster = m.roster;
+      if (!vsMode) vsStatus(`ホストのスタートを待っています（${roster.length}人）`);
+    } else if (m.t === 'full') {
+      vsStatus('ルームは満員です（5人まで）');
+    } else if (m.t === 'start') {
       buildCourse(m.course, m.seed);
       courseBtns.forEach((b, j) => b.classList.toggle('selected', j === m.course));
       beginVersus();
-    } else if (m.t === 's' && remoteKart) {
-      remoteTarget = m;
-      remoteKart.wp = m.wp;
-      remoteKart.lap = m.lap;
-      if (m.b) remoteKart.boost = 0.2;
-      if (m.n) remoteKart.spin = 0.2;
-      if (m.sh) remoteKart.shield = 0.3;
-      remoteKart.glide = !!m.g;
-      if (m.lap > LAPS && !remoteKart.finished) {
-        remoteKart.finished = true;
-        finishOrder.push(remoteKart);
-      }
+    } else if (m.t === 'bye') {
+      hostGone();
+    } else {
+      handleGameMsg(m);
+    }
+  }
+
+  // レース中のメッセージを反映（m.from = 送り主のpid）
+  function handleGameMsg(m) {
+    if (m.t === 's') {
+      const rk = remoteKarts.get(m.from);
+      if (!rk) return;
+      rk.netTarget = m;
+      rk.wp = m.wp; rk.lap = m.lap;
+      if (m.b) rk.boost = 0.2;
+      if (m.n) rk.spin = 0.2;
+      if (m.sh) rk.shield = 0.3;
+      rk.glide = !!m.g;
+      if (m.lap > LAPS && !rk.finished) { rk.finished = true; finishOrder.push(rk); }
     } else if (m.t === 'banana') {
       bananas.push({ x: m.x, y: m.y, arm: 0.6, id: m.id });
     } else if (m.t === 'bhit') {
       const i = bananas.findIndex((b) => b.id === m.id);
       if (i >= 0) bananas.splice(i, 1);
-      if (remoteKart) remoteKart.crashIcon = 'banana'; // 相手が踏んだ
+      const rk = remoteKarts.get(m.from); if (rk) rk.crashIcon = 'banana';
     } else if (m.t === 'shot') {
-      shots.push({ x: m.x, y: m.y, vx: m.vx, vy: m.vy, life: 2.5, owner: remoteKart, id: m.id });
+      shots.push({ x: m.x, y: m.y, vx: m.vx, vy: m.vy, life: 2.5, owner: remoteKarts.get(m.from) || null, id: m.id });
     } else if (m.t === 'shotHit') {
       const i = shots.findIndex((s) => s.id === m.id);
       if (i >= 0) shots.splice(i, 1);
-      if (remoteKart) remoteKart.crashIcon = 'snowball'; // 相手に命中
+      const rk = remoteKarts.get(m.from); if (rk) rk.crashIcon = 'snowball';
     } else if (m.t === 'zap') {
-      zapKart(player);
+      if (player && !player.finished) zapKart(player); // 自分いがいの雷 → 自分が感電
     } else if (m.t === 'box') {
       if (itemBoxes[m.i]) itemBoxes[m.i].respawn = 4;
     } else if (m.t === 'fin') {
-      remoteFinish = m.time;
-    } else if (m.t === 'bye') {
-      onNetClosed();
+      netFinish.set(m.from, m.time);
+      const rk = remoteKarts.get(m.from);
+      if (rk && !rk.finished) { rk.finished = true; finishOrder.push(rk); }
     }
-  }
-
-  // vsMode確定前（start送信時）にも使う生送信
-  function netSendRaw(obj) {
-    if (net) { try { net.send(obj); } catch (e) { /* 無視 */ } }
   }
 
   function beginVersus() {
@@ -3535,17 +3653,18 @@
     panel.classList.add('hidden');
     hud.classList.remove('hidden');
     vsMenu.classList.add('hidden');
+    vsStartBtn.classList.add('hidden');
     state = 'count';
     countT = 3.5;
   }
 
-  function onNetClosed() {
-    if (!net) return;
-    const wasRacing = vsMode && state !== 'title';
-    net = null;
-    leaveNet();
+  function hostGone() {
+    const wasRacing = vsMode;
+    hostConn = null;
+    if (netHandle) { try { netHandle.close(); } catch (e) { /* 無視 */ } netHandle = null; }
+    vsMode = false; isHost = false; roster = []; roomCode = null;
     if (wasRacing) {
-      msgEl.textContent = '相手との接続が切れました';
+      msgEl.textContent = 'ホストとの接続が切れました';
       setTimeout(() => {
         msgEl.textContent = '';
         state = 'title';
@@ -3556,10 +3675,11 @@
     } else {
       vsStatus('接続が切れました');
     }
+    updateLobby();
   }
 
   function netTick(now) {
-    if (!vsMode || !net || !player) return;
+    if (!vsMode || !player) return;
     if (now - lastNetSend < 66) return; // 約15Hz
     lastNetSend = now;
     netSend({
@@ -3578,8 +3698,15 @@
     initAudio();
     vsMenu.classList.toggle('hidden');
   });
-  document.getElementById('vs-host').addEventListener('click', () => startNet('host'));
-  document.getElementById('vs-join').addEventListener('click', () => startNet('guest'));
+  document.getElementById('vs-host').addEventListener('click', startHost);
+  document.getElementById('vs-join').addEventListener('click', startJoin);
+  vsStartBtn.addEventListener('click', () => {
+    if (!isHost || roster.length < 2) return;
+    broadcast({ t: 'start', course: courseIdx, seed: courseSeed });
+    beginVersus();
+  });
+  // タブを閉じるときは「bye」を送って相手にきれいに知らせる
+  window.addEventListener('beforeunload', () => { if (roomCode) leaveNet(); });
 
   // ===== コース選択UI =====
   const courseBtns = COURSES.map((c, i) => {
@@ -3686,5 +3813,16 @@
     give: (t) => { if (player) player.item = t; },
     texURL: () => texCanvas.toDataURL(),
     isDirt, isRoad, heightAt,
+    // 対戦（検証用）
+    get vsMode() { return vsMode; },
+    get isHost() { return isHost; },
+    get myPid() { return myPid; },
+    get roster() { return roster; },
+    get remoteKarts() { return remoteKarts; },
+    get nKarts() { return karts.length; },
+    useItem: () => { if (player && player.item) useItem(player); },
+    // 検証用: 自分の状態をいま送る（レンダリングに依存せず通信を確認できる）
+    ping: () => { if (vsMode && player) netSend({ t: 's', x: player.x, y: player.y, a: player.a, sp: player.speed, wp: player.wp, lap: player.lap }); },
+    sendMsg: (m) => netSend(m),
   };
 })();
