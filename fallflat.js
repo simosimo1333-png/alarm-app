@@ -1683,7 +1683,7 @@ function loadPeerJs() {
   if (window.Peer) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
+    s.src = './lib/peerjs.min.js';
     s.onload = resolve;
     s.onerror = reject;
     document.head.appendChild(s);
