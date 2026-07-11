@@ -10,8 +10,19 @@ import * as CANNON from 'cannon-es';
 
 /* ===== 定数 ===== */
 const MAX_PLAYERS = 5;
-const GRAVITY = -18;
+const GRAVITY = -11;             // 低めの重力＝ふわっとした本家風ジャンプ・落下
 const FIXED_DT = 1 / 60;
+/* ── キャラの動きチューニング（HFF風もっさりフィール） ── */
+const WALK_SPEED = 3.4;          // 歩行最高速 m/s（2.5〜3.5）
+const WALK_ACCEL = 0.085;        // 地上の速度ブレンド係数（最高速まで~0.5秒）
+const AIR_ACCEL = 0.035;         // 空中の効きはよわめ
+const JUMP_SPEED = 4.8;          // ジャンプ初速（到達 ~1.0m）
+const HANG_JUMP = 4.4;           // ぶらさがりから跳ぶとき
+const AIR_POSTURE = 0.4;         // ジャンプ・落下中の姿勢維持は30-50%に減衰（脱力）
+const HARD_FALL_V = 7.5;         // これより速く落ちて着地→ラグドール脱力
+const LIMP_TIME = 0.8;           // 着地脱力の長さ（0.5〜1.0秒）
+const ARM_LEN = 0.72;            // うでの長さ（つかみ時のリーチ）
+const OFF_WHITE = 0xf2f0eb;      // キャラの基本色（オフホワイト）
 const FALL_Y = -8;               // 物がこれよりしずんだら持ち場へもどる
 const WATER_Y = -3.5;            // 海面の高さ（見た目のはいけい）
 const RESPAWN_Y = -2.4;          // これより落ちたらチェックポイントからやりなおし（海に落ちる前）
@@ -20,8 +31,8 @@ const SKY_LIMP = 1.35;           // 降ってくるあいだラグドール（�
 const SNAP_MS = 50;              // ホストの配信間隔 (20Hz)
 const INPUT_MS = 50;             // ゲストの入力送信間隔
 const INTERP_DELAY = 130;        // ゲスト側の補間遅延(ms)
-// スキン: 体の色 × ぼうし
-const SKIN_COLORS = [0xff6b6b, 0x4dabf7, 0x51cf66, 0xffd43b, 0xb197fc, 0xff9f43, 0x3bc9db, 0xf783ac];
+// スキン: 体の差し色（上半身の色）× ぼうし。先頭＝オフホワイト（デフォルト）
+const SKIN_COLORS = [OFF_WHITE, 0xff6b6b, 0x4dabf7, 0x51cf66, 0xffd43b, 0xb197fc, 0xff9f43, 0x3bc9db];
 const HAT_NAMES = ['なし', 'ぼうし', 'かんむり', 'ねこみみ', 'ハット'];
 function normSkin(s) {
   const c = s && Number.isFinite(+s.c) ? Math.min(SKIN_COLORS.length - 1, Math.max(0, Math.floor(+s.c))) : 0;
@@ -238,7 +249,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x9ed1f2);
 scene.fog = new THREE.Fog(0x9ed1f2, 38, 110);
 
-const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 240);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 240); // FOV 50-60°（本家風）
 
 function onResize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -765,6 +776,12 @@ buildLevel(courseSel);
 const UP = new THREE.Vector3(0, 1, 0);
 const _tv1 = new THREE.Vector3(), _tv2 = new THREE.Vector3(), _tv3 = new THREE.Vector3();
 
+// 名札のふちどり色（オフホワイトなど明るすぎる色は青グレーに）
+function labelColor(c) {
+  const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+  return (r + g + b) / 3 > 215 ? 0x8a97a8 : c;
+}
+
 function makeNameSprite(name, colorHex) {
   const cv = document.createElement('canvas');
   cv.width = 256; cv.height = 64;
@@ -832,91 +849,139 @@ function addHatTo(group, h, bodyColor) {
 class Rig {
   constructor(skin, name) {
     skin = normSkin(skin);
-    const color = SKIN_COLORS[skin.c];
-    this.color = color;
-    const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.65 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xffe8d1, roughness: 0.7 });
-    const darkMat = new THREE.MeshStandardMaterial({ color: 0x333344, roughness: 0.5 });
+    const accent = SKIN_COLORS[skin.c];
+    this.color = accent;
+    // 基本はオフホワイトのミニマル人型。スキン色は「上半身の差し色」
+    const bodyMat = new THREE.MeshStandardMaterial({ color: OFF_WHITE, roughness: 0.8 });
+    const accentMat = skin.c === 0 ? bodyMat : new THREE.MeshStandardMaterial({ color: accent, roughness: 0.75 });
 
     this.group = new THREE.Group();
 
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.7, 6, 14), bodyMat);
-    torso.castShadow = true;
-    this.group.add(torso);
+    // 腰まわり（下半身・オフホワイト）
+    const hips = new THREE.Mesh(new THREE.SphereGeometry(0.27, 14, 10), bodyMat);
+    hips.scale.set(1, 0.82, 0.9);
+    hips.position.y = -0.3;
+    // 樽型の胴（上半身＝差し色）
+    const chest = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.3, 6, 14), accentMat);
+    chest.scale.set(1, 1, 0.88);
+    chest.position.y = 0.06;
+    hips.castShadow = chest.castShadow = true;
+    this.group.add(hips, chest);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 16, 12), skinMat);
-    head.position.set(0, 0.78, 0);
-    head.castShadow = true;
-    this.group.add(head);
-    for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), darkMat);
-      eye.position.set(0.075 * sx, 0.82, 0.185);
-      this.group.add(eye);
+    // 首＋頭（まるく大きめ・顔ディテールなし）。headGrpごと揺らして「遅れ」を出す
+    this.headGrp = new THREE.Group();
+    this.headGrp.position.y = 0.5;
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.115, 0.16, 10), bodyMat);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 18, 14), bodyMat);
+    head.position.y = 0.27; // ワールド~0.77（ぼうし位置は旧頭と同じ）
+    neck.castShadow = head.castShadow = true;
+    this.headGrp.add(neck, head);
+    if (skin.h) {
+      const hatHolder = new THREE.Group();
+      hatHolder.position.y = -0.5; // addHatTo は胴中心原点の座標系なので相殺
+      addHatTo(hatHolder, skin.h, accent);
+      this.headGrp.add(hatHolder);
     }
-    if (skin.h) addHatTo(this.group, skin.h, color);
+    this.group.add(this.headGrp);
 
-    // あし（ひざなし・ふりこアニメ）
+    // あし（太い円筒＋ミトン状の足・ひざなし。バネ追従でオーバーシュート）
     this.legs = [];
+    this.legState = [{ a: 0, v: 0 }, { a: 0, v: 0 }];
     for (const sx of [-1, 1]) {
       const hip = new THREE.Group();
-      hip.position.set(0.12 * sx, -0.35, 0);
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.075, 0.3, 10), bodyMat);
-      leg.position.y = -0.14;
-      leg.castShadow = true;
-      hip.add(leg);
+      hip.position.set(0.14 * sx, -0.3, 0);
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.09, 0.24, 10), bodyMat);
+      leg.position.y = -0.12;
+      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), bodyMat);
+      foot.scale.set(1, 0.8, 1.25);
+      foot.position.y = -0.25;
+      leg.castShadow = foot.castShadow = true;
+      hip.add(leg, foot);
       this.group.add(hip);
       this.legs.push(hip);
     }
 
-    // うで（かた→手のシリンダーを毎フレーム張りなおす）と手
+    // うで（太い円筒・かた→手を毎フレーム張りなおす）とミトン状の手（球）
     this.arms = [];
     this.hands = [];
     this.handMats = [];
     for (let i = 0; i < 2; i++) {
-      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 1, 8), bodyMat);
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.088, 0.088, 1, 10), bodyMat);
       arm.castShadow = true;
       scene.add(arm);
       this.arms.push(arm);
-      const hm = new THREE.MeshStandardMaterial({ color: 0xffe8d1, roughness: 0.7 });
-      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), hm);
+      const hm = new THREE.MeshStandardMaterial({ color: OFF_WHITE, roughness: 0.8 });
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 10), hm);
       hand.castShadow = true;
       scene.add(hand);
       this.hands.push(hand);
       this.handMats.push(hm);
     }
 
-    this.nameSpr = makeNameSprite(name, color);
+    this.nameSpr = makeNameSprite(name, labelColor(accent));
     scene.add(this.nameSpr);
     scene.add(this.group);
 
     this.lastPos = new THREE.Vector3();
     this.phase = 0;
     this.speedSm = 0;
+    this.vySm = 0;
+    this.yawVelSm = 0;
+    this.lastYaw = 0;
+    this.limpSm = 0;
   }
 
-  // p:Vector3ふう, q:Quaternionふう, hl/hr: [x,y,z], grabMask: bit0=左手 bit1=右手
-  setPose(p, q, hl, hr, grabMask, dt) {
+  // p:Vector3ふう, q:Quaternionふう, hl/hr: [x,y,z],
+  // flags: bit0=左手つかみ bit1=右手つかみ bit2=脱力（ラグドール）
+  setPose(p, q, hl, hr, flags, dt) {
+    const grabMask = flags & 3;
+    const limp = !!(flags & 4);
     const g = this.group;
     g.position.set(p.x, p.y, p.z);
     g.quaternion.set(q.x, q.y, q.z, q.w);
     g.updateMatrixWorld();
 
-    // あし（移動スピードでふりこ）
+    // 移動・旋回・落下スピードを平滑化（慣性のある手続きアニメ用）
     if (dt > 0) {
       const sp = _tv1.set(p.x - this.lastPos.x, 0, p.z - this.lastPos.z).length() / dt;
-      this.speedSm += (Math.min(sp, 5) - this.speedSm) * 0.2;
-      this.phase += this.speedSm * dt * 3.2;
+      this.speedSm += (Math.min(sp, 5) - this.speedSm) * Math.min(1, dt * 10);
+      this.phase += this.speedSm * dt * 3.4;
+      const vy = (p.y - this.lastPos.y) / dt;
+      this.vySm += (Math.min(6, Math.max(-6, vy)) - this.vySm) * Math.min(1, dt * 6);
+      const yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.z * q.z));
+      let dy = yaw - this.lastYaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      this.yawVelSm += (Math.min(6, Math.max(-6, dy / dt)) - this.yawVelSm) * Math.min(1, dt * 8);
+      this.lastYaw = yaw;
+      this.limpSm += ((limp ? 1 : 0) - this.limpSm) * Math.min(1, dt * 7);
     }
     this.lastPos.set(p.x, p.y, p.z);
-    const amp = Math.min(this.speedSm / 3, 1) * 0.65;
-    this.legs[0].rotation.x = Math.sin(this.phase) * amp;
-    this.legs[1].rotation.x = Math.sin(this.phase + Math.PI) * amp;
+
+    // あし: バネで目標角へ追従（遅れ＋オーバーシュート＝ふにゃふにゃ千鳥足）
+    const walkAmp = Math.min(this.speedSm / WALK_SPEED, 1);
+    const amp = walkAmp * 0.72 * (1 - this.limpSm);
+    for (let i = 0; i < 2; i++) {
+      const st = this.legState[i];
+      const target = Math.sin(this.phase + (i ? Math.PI : 0)) * amp + this.limpSm * (i ? -0.85 : 0.55);
+      if (dt > 0) {
+        st.v += (target - st.a) * 130 * dt - st.v * 9 * dt;
+        st.a += st.v * dt;
+      } else st.a = target;
+      this.legs[i].rotation.x = st.a;
+      this.legs[i].rotation.z = (i ? -1 : 1) * -this.limpSm * 0.45;
+    }
+
+    // あたま: 旋回・落下に遅れてついてくる＋歩行ボブ。脱力中はがくっと前へ
+    this.headGrp.rotation.y = -this.yawVelSm * 0.09;
+    this.headGrp.rotation.x = -this.vySm * 0.05 + Math.sin(this.phase * 2) * 0.05 * walkAmp + this.limpSm * 0.5;
+    this.headGrp.rotation.z = Math.sin(this.phase) * 0.045 * walkAmp;
 
     // うで
     const hands = [hl, hr];
     for (let i = 0; i < 2; i++) {
       const sx = i === 0 ? -1 : 1;
-      const shoulder = _tv1.set(0.3 * sx, 0.32, 0).applyMatrix4(g.matrixWorld);
+      const shoulder = _tv1.set(0.27 * sx, 0.3, 0).applyMatrix4(g.matrixWorld);
       const hp = _tv2.set(hands[i][0], hands[i][1], hands[i][2]);
       const arm = this.arms[i];
       arm.position.copy(shoulder).add(hp).multiplyScalar(0.5);
@@ -925,10 +990,10 @@ class Rig {
       arm.scale.set(1, len, 1);
       arm.quaternion.setFromUnitVectors(UP, dir.normalize());
       this.hands[i].position.copy(hp);
-      this.handMats[i].color.setHex((grabMask >> i) & 1 ? 0xffd43b : 0xffe8d1);
+      this.handMats[i].color.setHex((grabMask >> i) & 1 ? 0xffd43b : OFF_WHITE);
     }
 
-    this.nameSpr.position.set(p.x, p.y + 1.35, p.z);
+    this.nameSpr.position.set(p.x, p.y + 1.45, p.z);
   }
 
   dispose() {
@@ -948,7 +1013,7 @@ const playerGroup = (idx) => 4 << idx; // idx 0..4 → bit 2..6
 function initPhysics() {
   world = new CANNON.World({ gravity: new CANNON.Vec3(0, GRAVITY, 0), allowSleep: true });
   world.broadphase = new CANNON.SAPBroadphase(world);
-  world.defaultContactMaterial.friction = 0.4;
+  world.defaultContactMaterial.friction = 0.55; // 高めの摩擦＝物の引きずり感
   world.defaultContactMaterial.restitution = 0;
 
   groundMaterial = new CANNON.Material('ground');
@@ -1279,7 +1344,9 @@ class Doll {
     this.lastJump = 0;
     this.wetMsg = false;
     this.airTime = 0;
-    this.input = { x: 0, z: 0, j: 0, gl: 0, gr: 0, ap: 0.35 };
+    this.prevVy = 0;
+    this.armPhase = 0;
+    this.input = { x: 0, z: 0, j: 0, gl: 0, gr: 0, ap: 0 };
 
     const grp = playerGroup(colorIdx);
     const mask = ~grp;
@@ -1300,7 +1367,7 @@ class Doll {
     torso.dollId = id;
     torso.addEventListener('collide', (ev) => {
       const v = Math.abs(ev.contact.getImpactVelocityAlongNormal());
-      if (v > 9) { this.limpUntil = simT + 1.1; this.hitSound('thud'); } // つよい衝撃でのびる
+      if (v > 8) { this.limpUntil = Math.max(this.limpUntil, simT + 1.0); this.hitSound('thud'); } // つよい衝撃でのびる
     });
     world.addBody(torso);
     this.torso = torso;
@@ -1319,7 +1386,7 @@ class Doll {
       hand.allowSleep = false;
       hand.dollId = id;
       world.addBody(hand);
-      this.sides.push({ sx, body: hand, grabC: null, holdC: null, cool: 0 });
+      this.sides.push({ sx, body: hand, grabC: null, holdC: null, cool: 0, elev: 0.6 });
     }
 
     this.place(false); // ゲーム開始時はチェックポイントに立って開始
@@ -1400,7 +1467,6 @@ class Doll {
   control() {
     const inp = this.input;
     const torso = this.torso;
-    const limp = simT < this.limpUntil;
 
     // 接地チェック（自分以外になにか触れているか、下にレイ）
     const from = torso.position;
@@ -1421,78 +1487,103 @@ class Doll {
     }
     const hanging = this.grabbing;
 
-    // 着地音（空中→接地の瞬間だけ・歩行中の接触では鳴らさない）
+    // 着地: 音＋「高速落下→着地」で0.5-1.0秒ラグドール脱力（入力無効・倒れる）→起き上がり
     if (grounded) {
       if (this.airTime > 0.28) this.hitSound('land');
+      if (this.prevVy < -HARD_FALL_V && this.airTime > 0.25) {
+        this.limpUntil = Math.max(this.limpUntil, simT + LIMP_TIME);
+        // ばたっと倒れるよう軽くランダムに回す
+        torso.angularVelocity.x += (Math.random() - 0.5) * 4;
+        torso.angularVelocity.z += (Math.random() - 0.5) * 4;
+        this.hitSound('thud');
+      }
       this.airTime = 0;
     } else {
       this.airTime += FIXED_DT;
     }
+    const limp = simT < this.limpUntil;
 
-    // トランポリン
+    // トランポリン（重力が軽いぶん初速を補正して以前と同じ高さに）
     if (grounded && ray.body.bouncePad && torso.velocity.y < 2) {
-      torso.velocity.y = ray.body.bouncePad;
+      torso.velocity.y = ray.body.bouncePad * Math.sqrt(-GRAVITY / 18);
     }
 
     if (!limp) {
       // ── バランス（起き上がりトルク・ばね式でふにゃっとする）
+      //    ジャンプ・落下中は30-50%に減衰して「脱力して飛ぶ」
+      const posture = (grounded || hanging) ? 1 : AIR_POSTURE;
       const bodyUp = torso.quaternion.vmult(new CANNON.Vec3(0, 1, 0));
       const axis = bodyUp.cross(new CANNON.Vec3(0, 1, 0));
-      torso.torque.x += axis.x * 150 - torso.angularVelocity.x * 14;
-      torso.torque.z += axis.z * 150 - torso.angularVelocity.z * 14;
+      torso.torque.x += (axis.x * 150 - torso.angularVelocity.x * 14) * posture;
+      torso.torque.z += (axis.z * 150 - torso.angularVelocity.z * 14) * posture;
 
       // ── 移動は速度ブレンド方式（力だと摩擦との偶力で倒れてしまう）
+      //    加速はゆっくり（最高速まで~0.5秒）・旋回ももっさり
       const gvx = groundVel ? groundVel.x : 0;
       const gvz = groundVel ? groundVel.z : 0;
       const mlen = Math.hypot(inp.x, inp.z);
       if (mlen > 0.15) {
-        // 進行方向をむく
+        // 進行方向をむく（ゆっくり旋回）
         const fwd = torso.quaternion.vmult(new CANNON.Vec3(0, 0, 1));
         let d = Math.atan2(inp.x, inp.z) - Math.atan2(fwd.x, fwd.z);
         while (d > Math.PI) d -= Math.PI * 2;
         while (d < -Math.PI) d += Math.PI * 2;
-        torso.torque.y += d * 22 - torso.angularVelocity.y * 4;
+        torso.torque.y += d * 12 - torso.angularVelocity.y * 3.5;
 
         const s = Math.min(1, mlen);
-        const tvx = gvx + (inp.x / mlen) * 4.2 * s;
-        const tvz = gvz + (inp.z / mlen) * 4.2 * s;
-        const k = grounded ? 0.18 : 0.045;
+        const tvx = gvx + (inp.x / mlen) * WALK_SPEED * s;
+        const tvz = gvz + (inp.z / mlen) * WALK_SPEED * s;
+        const k = grounded ? WALK_ACCEL : AIR_ACCEL;
         torso.velocity.x += (tvx - torso.velocity.x) * k;
         torso.velocity.z += (tvz - torso.velocity.z) * k;
       } else {
-        torso.torque.y += -torso.angularVelocity.y * 4;
+        torso.torque.y += -torso.angularVelocity.y * 3.5;
         if (grounded) {
           // 立ちどまるブレーキ（うごく床の速度にあわせる）
-          torso.velocity.x += (gvx - torso.velocity.x) * 0.16;
-          torso.velocity.z += (gvz - torso.velocity.z) * 0.16;
+          torso.velocity.x += (gvx - torso.velocity.x) * 0.12;
+          torso.velocity.z += (gvz - torso.velocity.z) * 0.12;
         }
       }
 
       // ── ジャンプ（ぶらさがり中は手をはなして跳ぶ）
       if (inp.j !== this.lastJump) {
         this.lastJump = inp.j;
-        if (grounded) torso.velocity.y = 7.2;
-        else if (hanging) { this.releaseGrabs(); torso.velocity.y = 6.2; }
+        if (grounded) torso.velocity.y = JUMP_SPEED;
+        else if (hanging) { this.releaseGrabs(); torso.velocity.y = HANG_JUMP; }
       }
+    } else {
+      this.lastJump = inp.j; // 脱力中のジャンプ入力はすてる
     }
 
-    // ── うで（左右べつべつ・カメラの上下でうでの高さがかわる）
+    // ── うで（左右べつべつ）: つかみ中の目標角度＝カメラピッチに1:1連動
+    //    可動域 下-30°〜頭上+170°。バネで遅れて追従して「ふにゃ」感を出す
+    const vp = Math.min(2.4, Math.max(-1.25, Number.isFinite(+inp.ap) ? +inp.ap : 0)); // 視線の上下(+が上)
+    const armTarget = Math.min(2.97, Math.max(-0.52,
+      vp >= 0 ? 0.30 + vp * 2.19 : 0.30 + vp * 0.78)); // rad: 見下ろし-30° / 正面~17° / 見上げ170°
+    // つかんでいない手は歩行にあわせて前後スイング（物理バネなので遅れ・オーバーシュートが出る）
+    const hsp = Math.hypot(torso.velocity.x, torso.velocity.z);
+    this.armPhase += hsp * FIXED_DT * 3.4;
+    const swing = Math.min(1, hsp / WALK_SPEED) * 0.26;
+
     for (const s of this.sides) {
       const hand = s.body;
       const grab = !limp && (s.sx < 0 ? inp.gl : inp.gr);
+      s.elev += (armTarget - s.elev) * 0.14; // バネ的な遅れ
       let local;
       if (grab) {
-        const elev = Math.min(1.15, Math.max(-0.35, 0.75 - (Number.isFinite(+inp.ap) ? +inp.ap : 0.35)));
-        local = new CANNON.Vec3(0.24 * s.sx, Math.sin(elev) * 0.72, Math.cos(elev) * 0.72);
+        local = new CANNON.Vec3(0.26 * s.sx, 0.12 + Math.sin(s.elev) * ARM_LEN, Math.cos(s.elev) * ARM_LEN);
       } else {
-        local = new CANNON.Vec3(0.42 * s.sx, -0.1, 0.06);  // 体のよこ
+        const ph = this.armPhase + (s.sx < 0 ? Math.PI : 0);
+        local = new CANNON.Vec3(0.42 * s.sx, -0.08, 0.05 + Math.sin(ph) * swing); // 体のよこ＋歩行スイング
       }
       const target = torso.pointToWorldFrame(local, new CANNON.Vec3());
-      hand.force.x += (target.x - hand.position.x) * 32 - hand.velocity.x * 3;
-      hand.force.y += (target.y - hand.position.y) * 32 - hand.velocity.y * 3 - GRAVITY * hand.mass;
-      hand.force.z += (target.z - hand.position.z) * 32 - hand.velocity.z * 3;
+      // 脱力中はうでもだらんとする（バネよわめ・重力補償なし）
+      const K = limp ? 6 : 30, D = limp ? 1.5 : 3.2;
+      hand.force.x += (target.x - hand.position.x) * K - hand.velocity.x * D;
+      hand.force.y += (target.y - hand.position.y) * K - hand.velocity.y * D - (limp ? 0 : GRAVITY * hand.mass);
+      hand.force.z += (target.z - hand.position.z) * K - hand.velocity.z * D;
 
-      // ── つかむ / はなす（手ごとに独立 → 手わたりで登れる）
+      // ── つかむ / はなす（手ごとに独立 → 片手ずつ掛け替えて登れる）
       if (grab) {
         if (!s.grabC && simT > s.cool) this.tryGrab(s);
       } else if (s.grabC) {
@@ -1500,30 +1591,36 @@ class Doll {
       }
     }
 
-    // ── よじのぼり（本家方式）: 高いところにつかまってぶら下がり、
-    //    カメラを下にむける（＝腕を下げる）と体がひきあがる。前に入力すると乗りこえる
+    // ── よじのぼり（本家の文法）: 上を見て掴む → 下を見ながら前進 →
+    //    胴体が拘束点（手）の方向へ引き寄せられて持ち上がる
     if (!limp) {
-      const ap = Number.isFinite(+inp.ap) ? +inp.ap : 0.35;
-      const pull = Math.min(1, Math.max(0, (ap - 0.35) / 0.7)); // 下をむくほど1に近づく＝ひきあげ
+      const pull = Math.min(1, Math.max(0, (0.15 - vp) / 0.85)); // 下をむくほど1（vp<0.15で効きはじめ）
       let fx, fz;
       const ml = Math.hypot(inp.x, inp.z);
       if (ml > 0.15) { fx = inp.x / ml; fz = inp.z / ml; }
       else { const f = torso.quaternion.vmult(new CANNON.Vec3(0, 0, 1)); fx = f.x; fz = f.z; }
+      const fwdBoost = ml > 0.15 ? 1 : 0.45; // 前進入力で引きあげが強まる
       let mantle = null;
       for (const s of this.sides) {
         if (!s.grabC || !s.holdC) continue;
-        const hy = s.body.position.y;
+        const hp = s.body.position;
+        const hy = hp.y;
         if (hy > torso.position.y - 0.05) {          // 手が体と同じ高さ以上＝つかまっている
-          // カメラの上下でホールド距離をきめる（下をむく＝みじかく＝体があがる＝カメラ操作でひきあげ）
-          const targetDist = 0.72 - pull * 0.5;      // 0.72(ぶらさがり) 〜 0.22(ひきあげ)
+          // ホールド距離: 下をむくほど短く＝体が手にひきよせられる
+          const targetDist = 0.72 - pull * fwdBoost * 0.5; // 0.72(ぶらさがり)〜0.22(ひきあげ)
           s.holdC.distance += (targetDist - s.holdC.distance) * 0.3;
-          if (pull > 0.15) {
-            // 下をむいているあいだ 重力を上まわる力で体を手の高さへひきあげる（速度制限つき）
-            if (torso.velocity.y < 3.0) torso.force.y += torso.mass * (-GRAVITY) * (1.4 + pull * 0.8);
+          if (pull > 0.05 && torso.velocity.y < 3.0) {
+            // 胴体を拘束点方向へ引き寄せる力（重力に打ち勝つ・速度制限つき）
+            const dx = hp.x - torso.position.x, dy = hy - torso.position.y, dz = hp.z - torso.position.z;
+            const dl = Math.hypot(dx, dy, dz) || 1;
+            const F = torso.mass * -GRAVITY * (1.1 + 1.6 * pull * fwdBoost);
+            torso.force.x += (dx / dl) * F * 0.5;
+            torso.force.y += Math.max(0.25, dy / dl) * F;
+            torso.force.z += (dz / dl) * F * 0.5;
           }
-          // 乗りこえ: カメラで体をひきあげ切った状態（手のすぐ下）で前入力 → ふちの上へ乗りこえる
+          // 乗りこえ: 体を手のすぐ下まで引きあげた状態で下をむき前進 → ふちの上へ
           if (!mantle && pull > 0.5 && ml > 0.15 && torso.position.y > hy - 0.34) {
-            mantle = { hx: s.body.position.x, hy, hz: s.body.position.z };
+            mantle = { hx: hp.x, hy, hz: hp.z };
           }
         }
       }
@@ -1536,6 +1633,8 @@ class Doll {
         for (const s of this.sides) s.cool = simT + 0.4;   // すぐ再グラブしない
       }
     }
+
+    this.prevVy = torso.velocity.y; // 着地時の落下速度判定用（step前の速度）
   }
 
   removeFromWorld() {
@@ -1551,7 +1650,10 @@ class Doll {
 const keys = new Set();
 let jumpCount = 0;
 let mouseGrabL = false, mouseGrabR = false, keyGrab = false, touchGrab = false;
-let camYaw = Math.PI, camPitch = 0.35, camDist = 6.5;
+// カメラ: camPitch はカメラの高さ角（＋＝上から見下ろし）。視線ピッチは -camPitch
+const PITCH_MIN = -1.22, PITCH_MAX = 1.05;   // 見上げ+70° 〜 見下ろし-60°
+let camYaw = Math.PI, camPitch = 0.22, camDist = 4.2;
+let touchArmOff = 0;   // モバイル: ✊ボタン上下ドラッグ＝うでの高さオフセット（カメラと独立）
 const stickVec = { x: 0, y: 0 };
 
 window.addEventListener('keydown', (e) => {
@@ -1567,19 +1669,26 @@ window.addEventListener('keyup', (e) => {
 });
 window.addEventListener('blur', () => { keys.clear(); keyGrab = false; mouseGrabL = false; mouseGrabR = false; });
 
-// マウス: 左長押し=左手 / 右長押し=右手 / ドラッグ=カメラ
+// マウス: 左長押し=左手 / 右長押し=右手。PCはPointer Lock（クリックでロック・Escで解除）
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'touch') { touchCamStart(e); return; }
+  if (state === 'play' && !IS_TOUCH && !document.pointerLockElement && canvas.requestPointerLock) {
+    try {
+      const p = canvas.requestPointerLock();
+      if (p && p.catch) p.catch(() => { /* 非対応・拒否でもドラッグ操作で遊べる */ });
+    } catch (err) { /* 同上 */ }
+  }
   if (e.button === 0 && !mouseGrabL) { mouseGrabL = true; if (state === 'play') Sound.play('grab'); }
   if (e.button === 2 && !mouseGrabR) { mouseGrabR = true; if (state === 'play') Sound.play('grab'); }
-  canvas.setPointerCapture(e.pointerId);
+  if (!document.pointerLockElement) canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'touch') { touchCamMove(e); return; }
-  if (e.buttons) {
-    camYaw -= e.movementX * 0.005;
-    camPitch = Math.min(1.25, Math.max(-0.15, camPitch + e.movementY * 0.005));
+  // ロック中はマウス移動＝カメラ。未ロック時はドラッグでカメラ（フォールバック）
+  if (document.pointerLockElement === canvas || e.buttons) {
+    camYaw -= e.movementX * 0.0032;
+    camPitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, camPitch + e.movementY * 0.0032));
   }
 });
 canvas.addEventListener('pointerup', (e) => {
@@ -1588,17 +1697,17 @@ canvas.addEventListener('pointerup', (e) => {
   if (e.button === 2) mouseGrabR = false;
 });
 canvas.addEventListener('wheel', (e) => {
-  camDist = Math.min(10, Math.max(3.5, camDist * (e.deltaY > 0 ? 1.1 : 0.9)));
+  camDist = Math.min(6.5, Math.max(3.2, camDist * (e.deltaY > 0 ? 1.1 : 0.9)));
   e.preventDefault();
 }, { passive: false });
 
-// タッチカメラ（キャンバス上のスワイプ）
+// タッチカメラ（右半面をふくむキャンバス上のスワイプ）
 let camTouchId = null, camTouchLast = null;
 function touchCamStart(e) { if (camTouchId === null) { camTouchId = e.pointerId; camTouchLast = { x: e.clientX, y: e.clientY }; } }
 function touchCamMove(e) {
   if (e.pointerId !== camTouchId) return;
-  camYaw -= (e.clientX - camTouchLast.x) * 0.007;
-  camPitch = Math.min(1.25, Math.max(-0.15, camPitch + (e.clientY - camTouchLast.y) * 0.007));
+  camYaw -= (e.clientX - camTouchLast.x) * 0.006;
+  camPitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, camPitch + (e.clientY - camTouchLast.y) * 0.006));
   camTouchLast = { x: e.clientX, y: e.clientY };
 }
 function touchCamEnd(e) { if (e.pointerId === camTouchId) camTouchId = null; }
@@ -1627,11 +1736,25 @@ function stickEnd(e) {
 stickEl.addEventListener('pointerup', stickEnd);
 stickEl.addEventListener('pointercancel', stickEnd);
 
-// タッチボタン
+// タッチボタン。✊は押しっぱなし=両手つかみ＋押したまま上下ドラッグ=うでの高さ
 const tJump = $('t-jump'), tGrab = $('t-grab');
 tJump.addEventListener('pointerdown', (e) => { e.preventDefault(); jumpCount++; Sound.play('jump'); });
-tGrab.addEventListener('pointerdown', (e) => { e.preventDefault(); touchGrab = true; tGrab.classList.add('on'); Sound.play('grab'); });
-const grabOff = () => { touchGrab = false; tGrab.classList.remove('on'); };
+let grabDragId = null, grabDragY = 0;
+tGrab.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  touchGrab = true;
+  tGrab.classList.add('on');
+  Sound.play('grab');
+  grabDragId = e.pointerId;
+  grabDragY = e.clientY;
+  try { tGrab.setPointerCapture(e.pointerId); } catch (err) { /* 非対応でもOK */ }
+});
+tGrab.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== grabDragId) return;
+  // 上へドラッグ＝うでを上げる / 下へドラッグ＝下げる（カメラピッチとは独立のオフセット）
+  touchArmOff = Math.min(1.7, Math.max(-0.9, (grabDragY - e.clientY) / 90));
+});
+const grabOff = () => { touchGrab = false; touchArmOff = 0; grabDragId = null; tGrab.classList.remove('on'); };
 tGrab.addEventListener('pointerup', grabOff);
 tGrab.addEventListener('pointercancel', grabOff);
 
@@ -1672,7 +1795,7 @@ function localInput() {
     x: r2(x), z: r2(z), j: jumpCount,
     gl: (mouseGrabL || both) ? 1 : 0,   // 左手
     gr: (mouseGrabR || both) ? 1 : 0,   // 右手
-    ap: r2(camPitch),                   // カメラの上下 → うでの高さ
+    ap: r2(-camPitch + touchArmOff),    // 視線ピッチ(+上)＋モバイルの腕オフセット → うでの高さ
   };
 }
 
@@ -1828,7 +1951,7 @@ function enterPlay() {
   panelEl.classList.add('hidden');
   hudEl.classList.remove('hidden');
   updatePlayersHud();
-  showMsg('🚩 ゴールの旗をめざそう！ ✊つかむ で よじのぼり', 3600);
+  showMsg(IS_TOUCH ? '🚩 ゴールの旗をめざそう！ ✊で つかんで よじのぼり' : '🚩 ゴールの旗をめざそう！ クリックでマウス視点ON（Escで解除）', 3600);
   Sound.startAmbient(courseIdx);
 }
 
@@ -1893,7 +2016,7 @@ function wireGuest(conn) {
         doll.input = {
           x: +m.x || 0, z: +m.z || 0, j: +m.j || 0,
           gl: m.gl ? 1 : 0, gr: m.gr ? 1 : 0,
-          ap: Number.isFinite(+m.ap) ? +m.ap : 0.35,
+          ap: Number.isFinite(+m.ap) ? +m.ap : 0,
         };
       }
     } else if (m.t === 'rs' && pid !== null) {
@@ -2095,7 +2218,7 @@ function hostStep(dt, now) {
       t.position, t.quaternion,
       [doll.sides[0].body.position.x, doll.sides[0].body.position.y, doll.sides[0].body.position.z],
       [doll.sides[1].body.position.x, doll.sides[1].body.position.y, doll.sides[1].body.position.z],
-      (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0), dt,
+      (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0) | (simT < doll.limpUntil ? 4 : 0), dt,
     );
   }
   for (const o of dynObjects) {
@@ -2116,7 +2239,8 @@ function hostStep(dt, now) {
         r3(t.quaternion.x), r3(t.quaternion.y), r3(t.quaternion.z), r3(t.quaternion.w),
         r2(hl.x), r2(hl.y), r2(hl.z),
         r2(hr.x), r2(hr.y), r2(hr.z),
-        (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0),
+        // フラグ: bit0=左手 bit1=右手 bit2=脱力（ゲストの見た目リグ用）
+        (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0) | (simT < doll.limpUntil ? 4 : 0),
       ]);
     }
     const o = dynObjects.map((ob) => [
@@ -2169,19 +2293,32 @@ function guestStep(now) {
   }
 }
 
-/* カメラ */
-const camTargetSm = new THREE.Vector3(0, 1, 0);
-function updateCam() {
+/* カメラ: ピボット=胸〜頭(地上高~1.4m)・距離3.5-4.5m・指数スムージング・壁めり込み回避 */
+const camTargetSm = new THREE.Vector3(0, 1.4, 0);
+const _camPivot = new THREE.Vector3();
+const _camDir = new THREE.Vector3();
+const _camRay = new THREE.Raycaster();
+function updateCam(dt) {
   const rig = rigs.get(myId);
   if (!rig) return;
-  camTargetSm.lerp(rig.group.position, 0.18);
+  // ピボットは指数スムージング（ラグドールの細かい揺れを拾いすぎない）
+  _camPivot.copy(rig.group.position);
+  _camPivot.y += 0.75; // 胴中心(~0.65m)+0.75 ≒ 地上高1.4m
+  camTargetSm.lerp(_camPivot, 1 - Math.exp(-(dt || 0.016) * 9));
   const cp = Math.cos(camPitch), spitch = Math.sin(camPitch);
+  _camDir.set(Math.sin(camYaw) * cp, spitch, Math.cos(camYaw) * cp); // ピボット→カメラ方向（単位）
+  // 壁にめり込まないようレイキャストして距離を詰める
+  let dist = camDist;
+  _camRay.set(camTargetSm, _camDir);
+  _camRay.far = camDist + 0.3;
+  const hits = _camRay.intersectObjects(levelRoot.children, true);
+  if (hits.length) dist = Math.max(0.6, Math.min(dist, hits[0].distance - 0.25));
   camera.position.set(
-    camTargetSm.x + Math.sin(camYaw) * cp * camDist,
-    camTargetSm.y + spitch * camDist + 0.6,
-    camTargetSm.z + Math.cos(camYaw) * cp * camDist,
+    camTargetSm.x + _camDir.x * dist,
+    camTargetSm.y + _camDir.y * dist,
+    camTargetSm.z + _camDir.z * dist,
   );
-  camera.lookAt(camTargetSm.x, camTargetSm.y + 0.6, camTargetSm.z);
+  camera.lookAt(camTargetSm);
 }
 
 function menuCam(now) {
@@ -2243,7 +2380,7 @@ function animate(now) {
   if (state === 'play') {
     if (isHost) hostStep(dt, now);
     else guestStep(now);
-    updateCam();
+    updateCam(dt);
   } else {
     menuCam(now);
   }
