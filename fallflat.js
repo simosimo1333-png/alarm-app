@@ -1421,7 +1421,7 @@ function stepGimmicks() {
           const hp = s.body.position;
           if (Math.abs(hp.x - bt.pos[0]) < 0.5 && Math.abs(hp.y - bt.pos[1]) < 0.5 && Math.abs(hp.z - bt.pos[2]) < 0.55) {
             bt.on = true;
-            announce(bt.msg || '🔴 ボタンをおした！', 'gate');
+            announce(null, 'gate'); // 効果音のみ（解説ポップアップは出さない）
             break outer;
           }
         }
@@ -1447,7 +1447,7 @@ function stepGimmicks() {
     driveY(pd.gateIdx, pressed ? pd.gateOpenY : pd.gateHomeY, 1.2);
     if (pressed && !pd.announced) {
       pd.announced = true;
-      announce(pd.msg || '⚖️ おもみでとびらがひらいた！', 'gate');
+      announce(null, 'gate'); // 効果音のみ
     }
   }
 
@@ -1457,10 +1457,10 @@ function stepGimmicks() {
     const a = hingeAngle(lf.leverIdx);
     if (a > 0.3 && lf.target !== lf.y1) {
       lf.target = lf.y1;
-      announce('🛗 レバーON！リフトがあがる…', 'lever');
+      announce(null, 'lever'); // 効果音のみ
     } else if (a < -0.3 && lf.target !== lf.y0) {
       lf.target = lf.y0;
-      if (lf.moved) announce('🛗 リフトがさがる…', 'lever');
+      if (lf.moved) announce(null, 'lever'); // 効果音のみ
     }
     lf.moved = true;
     const lever = dynObjects[lf.leverIdx].body;
@@ -1485,7 +1485,7 @@ function stepGimmicks() {
       hinge.setMotorSpeed(-clamp((target - th) * 2.5, pulled ? 0.85 : 0.4));
       if (th < 0.15) {
         db.open = true;
-        announce('🌉 はねばしがおりた！おしろへ すすめ！', 'gate');
+        announce(null, 'gate'); // 効果音のみ
       }
     } else {
       hinge.setMotorSpeed(-clamp((0 - th) * 3, 0.8));   // 下りたまま保持
@@ -1501,7 +1501,7 @@ function stepGimmicks() {
         const p = dynObjects[wi].body.position;
         if (Math.abs(p.x - cp.pad[0]) < 1.0 && Math.abs(p.z - cp.pad[2]) < 1.05 && p.y > cp.pad[1] - 0.6 && p.y < cp.pad[1] + 1.2) {
           cp.fireAt = simT + 0.35;
-          announce('🪨 おもりがのった！カタパルト はっしゃ！', 'catapult');
+          announce(null, 'catapult'); // 効果音のみ
           break;
         }
       }
@@ -1534,7 +1534,7 @@ function stepGimmicks() {
   for (const bw of GIM.breakables) {
     if (bw.hit && !bw.announced) {
       bw.announced = true;
-      announce('💥 かべがくずれた！', 'thud');
+      announce(null, 'thud'); // 効果音のみ
     }
   }
 }
@@ -1569,7 +1569,7 @@ function stepWater() {
 
 /* 全員へのおしらせ＋効果音（ホストのみ呼ぶ・全ゲストにとどく） */
 function announce(text, sound) {
-  showMsg(text);
+  if (text) showMsg(text);
   if (sound) Sound.play(sound);
   broadcast({ t: 'm', text, s: sound });
 }
@@ -1834,6 +1834,26 @@ class Doll {
       hand.force.y += (target.y - hand.position.y) * K - hand.velocity.y * D - (limp ? 0 : GRAVITY * hand.mass);
       hand.force.z += (target.z - hand.position.z) * K - hand.velocity.z * D;
 
+      // もちはこび補助（腕の筋力）: 木箱くらいの動的オブジェクトを掴んでいる手は
+      // 重さの一部を支える（片手=55%・両手=110% → 両手でかかえて持ち上げ・つみ上げができる）。
+      // 反作用は胴体へ（=脚でささえる）。これがないと箱ごと空へ浮いてしまう。
+      // くさり(軽い)・鉄球や岩(重い)・他プレイヤーは対象外
+      if (s.grabC) {
+        const held = s.grabC.bodyB;
+        if (held.type === CANNON.Body.DYNAMIC && held.dollId === undefined
+            && held.mass >= 3 && held.mass <= 12.5) {
+          const lift = -GRAVITY * held.mass * 0.55;
+          hand.force.y += lift;                 // 拘束ごしに箱へつたわる
+          torso.force.y -= lift;                // 反作用（内力なので系ごとは浮かない）
+          // 見上げてかかえるときは腕がすこしのびて高くもてる（つみ上げ用）
+          if (vp > 0.15 && s.holdC) s.holdC.distance += (0.78 - s.holdC.distance) * 0.02;
+          // かかえた箱の暴れをおさえる減衰
+          held.force.x -= held.velocity.x * held.mass * 0.35;
+          held.force.z -= held.velocity.z * held.mass * 0.35;
+          held.force.y -= Math.max(0, held.velocity.y) * held.mass * 0.3;
+        }
+      }
+
       // ── つかむ / はなす（手ごとに独立 → 片手ずつ掛け替えて登れる）
       if (grab) {
         if (!s.grabC && simT > s.cool) this.tryGrab(s);
@@ -1854,6 +1874,11 @@ class Doll {
       let mantle = null;
       for (const s of this.sides) {
         if (!s.grabC || !s.holdC) continue;
+        // 動的オブジェクト（木箱・岩・他プレイヤーなど）を掴んでいるあいだは
+        // よじのぼり補助をかけない（箱を動かすときに体が箱へ引っ張られてガクつくのを防ぐ）。
+        // 補助（引き寄せ力・ホールド短縮・乗りこえ）は静的な壁・かべ・キネマティック床のみ
+        const held = s.grabC.bodyB;
+        if (held.type === CANNON.Body.DYNAMIC) continue;
         const hp = s.body.position;
         const hy = hp.y;
         if (hy > torso.position.y - 0.05) {          // 手が体と同じ高さ以上＝つかまっている
@@ -2202,7 +2227,7 @@ function enterPlay() {
   panelEl.classList.add('hidden');
   hudEl.classList.remove('hidden');
   updatePlayersHud();
-  showMsg(IS_TOUCH ? '🚩 ゴールの旗をめざそう！ ✊で つかんで よじのぼり' : '🚩 ゴールの旗をめざそう！ クリックでマウス視点ON（Escで解除）', 3600);
+  // プレイ中の解説ポップアップは出さない（操作説明はメニューの .help にまとまっている）
   Sound.startAmbient(courseIdx);
 }
 
@@ -2429,13 +2454,12 @@ function hostStep(dt, now) {
     // 落ちたら海に落ちる前にチェックポイントからやり直し
     if (p.y < RESPAWN_Y) {
       doll.respawn();
-      tellDoll(doll, '💫 チェックポイントからやりなおし！');
       continue;
     }
     for (const zn of CP_ZONES) {
       if (zn.cp > doll.cp && p.x > zn.x0 && p.x < zn.x1 && p.z > zn.z0 && p.z < zn.z1 && p.y > zn.yMin && p.y < zn.yMin + 5) {
         doll.cp = zn.cp;
-        tellDoll(doll, '🚩 チェックポイント！', 'checkpoint');
+        tellDoll(doll, null, 'checkpoint'); // 効果音のみ
       }
     }
     if (!doll.goal && p.x > GOAL.x0 && p.x < GOAL.x1 && p.z > GOAL.z0 && p.y > GOAL.y) {
