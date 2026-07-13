@@ -563,7 +563,8 @@ function gimButtonDoor(btnPos, doorHome, doorSize, openY, msg, doorMat = MAT.red
 
 // 床スイッチ（おもみで作動）＋スライドするとびら
 function gimPadDoor(padPos, doorHome, doorSize, openY, msg, doorMat = MAT.blue) {
-  staticBox(2.0, 0.12, 2.0, padPos[0], padPos[1] - 0.13, padPos[2], MAT.ironDark);   // わく
+  // わく（上面は床とツライチ＝箱をおしてそのまま乗せられる）
+  staticBox(2.0, 0.06, 2.0, padPos[0], padPos[1] + 0.04, padPos[2], MAT.ironDark);
   const pad = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.14, 1.7), MAT.blue);
   const padIdx = kinObject(pad, 'box', [1.7, 0.14, 1.7], [padPos[0], padPos[1], padPos[2]]);
   const door = new THREE.Mesh(new THREE.BoxGeometry(...doorSize), doorMat);
@@ -574,11 +575,20 @@ function gimPadDoor(padPos, doorHome, doorSize, openY, msg, doorMat = MAT.blue) 
 
 // レバー（ヒンジ棒）を作って index を返す
 function gimLever(x, y, z, angle0 = 0, opts = {}) {
-  staticBox(0.16, y - 0.5, 0.16, x, (y - 0.5) / 2 + (opts.baseY || 0), z, MAT.ironDark);
-  const idx = hingedBox(0.1, 0.85, 0.1, MAT.red, 1.2, [x, y, z], [0, -0.36, 0], [1, 0, 0], angle0,
-    { angularDamping: opts.springy ? 0.35 : 0.9 });
+  const baseY = opts.baseY || 0;
+  const postH = Math.max(0.2, y - baseY - 0.1);
+  // 支柱はよこにオフセット（レバーをおし切るとき体がぶつからない）＋じくの見た目
+  staticBox(0.14, postH, 0.14, x + 0.32, baseY + postH / 2, z, MAT.ironDark);
+  const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.42, 8), MAT.ironDark);
+  axle.rotation.z = Math.PI / 2;
+  axle.position.set(x + 0.18, y, z);
+  axle.castShadow = true;
+  levelRoot.add(axle);
+  // 長めのバー＋低めの支点＝体でおしても、つかんでひいても動かせる
+  const idx = hingedBox(0.1, 1.0, 0.1, MAT.red, 0.8, [x, y, z], [0, -0.42, 0], [1, 0, 0], angle0,
+    { angularDamping: 0.5 });
   const knob = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), MAT.red);
-  knob.position.y = 0.42;
+  knob.position.y = 0.48;
   dynObjects[idx].mesh.add(knob);
   return idx;
 }
@@ -616,10 +626,10 @@ function buildCourse1() {
 
   // ── 部屋B（z15..26）: 木箱を床スイッチへ（③） ──
   wallZ(26, -5.3, 5.3, 0, H, MAT.plaster, [{ x0: -1.0, x1: 1.0, y0: 0, y1: 2.45 }]);
-  gimPadDoor([2.6, 0.22, 24.3], [0, 1.41, 26], [2.1, 2.55, 0.22], -1.3,
+  gimPadDoor([2.6, 0.07, 22.3], [0, 1.41, 26], [2.1, 2.55, 0.22], -1.3,
     '⚖️ おもみで あおいとびらがひらいた！（はなれると しまるよ）');
   dynBox(0.72, 0.72, 0.72, 0.8, 0.55, 20, MAT.crate, 12, { noSleep: true });        // 木箱（スイッチ用）
-  dynBox(0.72, 0.72, 0.72, -1.6, 0.55, 21, MAT.crate, 12, { noSleep: true });
+  dynBox(0.72, 0.72, 0.72, -1.6, 0.55, 20.5, MAT.crate, 12, { noSleep: true });
 
   // ── 部屋C（z26..37）: はこをつんで たかい棚（ロフト 1.95m）へ（④） ──
   staticBox(10.6, 0.2, 6, 0, 1.85, 34, MAT.wood);                // ロフト（上面 y1.95）
@@ -672,7 +682,7 @@ function buildCourse2() {
   staticBox(2.6, 0.18, 0.8, 4.2, 0.09, 3.2, MAT.hazard);   // 黄色いしま板
 
   // ── ① 貨物リフト: レバーの角度で上下（z8..12のすきまをわたる） ──
-  const liftLever = gimLever(2.4, 1.04, 7.2, -0.45);
+  const liftLever = gimLever(2.4, 0.85, 7.2, -0.45);
   const liftMesh = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.25, 2.6), MAT.hazard);
   const liftIdx = kinObject(liftMesh, 'box', [2.6, 0.25, 2.6], [0, -0.125, 10]);
   GIM.lifts.push({ leverIdx: liftLever, liftIdx, y0: -0.125, y1: 2.875, target: -0.125, speed: 1.2 });
@@ -717,15 +727,11 @@ function buildCourse2() {
   dynBox(0.7, 0.7, 0.7, 2.5, 3.6, 33.5, MAT.crate, 12, { noSleep: true });           // 投げる/ぶつける用の木箱
   dynBox(0.7, 0.7, 0.7, -2.5, 3.6, 34.2, MAT.crate, 12, { noSleep: true });
 
-  // ── ④ ウィンチ: レバーをポンプするとゴンドラが上がる（協力プレイむき） ──
-  const winchLever = gimLever(1.8, 4.06, 40.4, 0.35, { springy: true, baseY: 3.0 });
-  GIM.springLevers.push({ idx: winchLever, rest: 0.35, k: 15, d: 0.65 });
+  // ── ④ ウィンチ: ハンドル（ヒンジ）の角度でゴンドラがゆっくり上下（乗って移動できる） ──
+  const winchLever = gimLever(1.8, 3.85, 40.4, -0.45, { baseY: 3.0 });
   const gondola = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.25, 2.3), MAT.hazard);
   const gondolaIdx = kinObject(gondola, 'box', [2.3, 0.25, 2.3], [0, 2.875, 42.4]);
-  GIM.winches.push({
-    leverIdx: winchLever, liftIdx: gondolaIdx, y0: 2.875, y1: 6.175, step: 0.85,
-    target: 2.875, armed: true, msg: '🎚️ ウィンチ！レバーをポンプすると ゴンドラがあがる',
-  });
+  GIM.lifts.push({ leverIdx: winchLever, liftIdx: gondolaIdx, y0: 2.875, y1: 6.175, target: 2.875, speed: 0.5 });
   addRod([0, 8.6, 42.4], gondolaIdx, 0.04, MAT.ironDark);          // つりワイヤー（見た目）
   staticBox(0.35, 6, 0.35, -1.5, 5.6, 42.4, MAT.ironDark);
   staticBox(0.35, 6, 0.35, 1.5, 5.6, 42.4, MAT.ironDark);
@@ -810,25 +816,24 @@ function buildCourse3() {
     dynObjects.push({ mesh: m, kind: 'sphere', radius: 0.42, mass: 30, noSleep: true, home: { p: [x, y, z] }, body: null });
     return dynObjects.length - 1;
   };
-  const w1 = rock(-2.9, 2.9, 24.4);
-  const w2 = rock(-2.1, 2.9, 24.4);
+  const w1 = rock(-2.9, 2.9, 23.7);
+  const w2 = rock(-2.1, 2.9, 23.7);
   GIM.catapults.push({
     idx: armIdx, rest: -0.48, weights: [w1, w2],
     pad: [-2.5, 2.1, 22.85], basket: [-2.5, 0.35, 19.2], vel: [1.5, 11.2, 6.4],
     readyAt: 0, fireAt: 0, launched: false,
   });
-  // おもりのたな（うしろから階段でのぼって、まえへころがしおとす）
-  staticBox(2.4, 0.3, 1.8, -2.5, 2.3, 24.6, MAT.woodDark);
-  staticBox(2.4, 0.24, 0.1, -2.5, 2.57, 25.45, MAT.woodDark);    // うしろのふち
-  staticBox(0.1, 0.24, 1.8, -3.65, 2.57, 24.6, MAT.woodDark);    // よこのふち
-  staticBox(0.1, 0.24, 1.8, -1.35, 2.57, 24.6, MAT.woodDark);
-  staticBox(2.4, 0.09, 0.08, -2.5, 2.5, 23.74, MAT.woodDark);    // まえの低いふち（おせばこえる）
-  staticBox(0.35, 2.2, 0.35, -3.5, 1.1, 25.3, MAT.woodDark);
-  staticBox(0.35, 2.2, 0.35, -1.5, 1.1, 25.3, MAT.woodDark);
-  stairs(4, 0.55, 0.5, 2.2, MAT.woodDark, -2.5, 0, 27, 'z', -1);
+  // おもりのたな（うしろから階段でのぼって、まえ＝うでの先へころがしおとす）
+  staticBox(2.4, 0.3, 1.8, -2.5, 2.3, 23.8, MAT.woodDark);
+  staticBox(2.4, 0.24, 0.1, -2.5, 2.57, 24.65, MAT.woodDark);    // うしろのふち
+  staticBox(0.1, 0.24, 1.8, -3.65, 2.57, 23.8, MAT.woodDark);    // よこのふち
+  staticBox(0.1, 0.24, 1.8, -1.35, 2.57, 23.8, MAT.woodDark);
+  staticBox(0.35, 2.2, 0.35, -3.5, 1.1, 24.5, MAT.woodDark);
+  staticBox(0.35, 2.2, 0.35, -1.5, 1.1, 24.5, MAT.woodDark);
+  stairs(4, 0.55, 0.5, 2.2, MAT.woodDark, -2.5, 0, 26.6, 'z', -1);
 
   // ── ③ はねばし（z27..31.4の堀2）: くさりをつかんで体重でひきおろす ──
-  islandBox(1.4, 1.4, 1.8, 0.1, 29);                              // 堀の中のとび石
+  islandBox(1.4, 1.4, 0.9, 0, 29.3);                              // 堀の中のとび石（くさりのま下ちかく）
   const bridgeIdx = hingedBox(3.2, 0.2, 4.4, MAT.woodDark, 5, [0, 0.12, 31.4], [0, 0, 2.2], [1, 0, 0], 1.22,
     { angularDamping: 0.5, motorForce: 60 });
   const bridgeChain = chain({ idx: bridgeIdx, local: [0, 0, -2.15] }, 5, 0.45, { grip: true });
@@ -934,8 +939,6 @@ function buildLevel(idx) {
   GIM.buttons = [];
   GIM.pads = [];
   GIM.lifts = [];
-  GIM.winches = [];
-  GIM.springLevers = [];
   GIM.drawbridges = [];
   GIM.catapults = [];
   GIM.breakables = [];
@@ -1269,9 +1272,10 @@ function initPhysics() {
   // キャラの摩擦は0（摩擦の偶力で転んでしまうため、停止・追従は速度ブレンドで行う）
   world.addContactMaterial(new CANNON.ContactMaterial(charMaterial, groundMaterial, { friction: 0, restitution: 0 }));
   world.addContactMaterial(new CANNON.ContactMaterial(handMaterial, groundMaterial, { friction: 0.8, restitution: 0 }));
-  // 木箱などの動的オブジェクト: 摩擦ひかえめ＝キャラの力でも「おす・ひきずる」ができる
-  // （箱と床の接触は4点になり摩擦が実質4倍効くため、数値は小さめにする）
-  world.addContactMaterial(new CANNON.ContactMaterial(objMaterial, groundMaterial, { friction: 0.07, restitution: 0 }));
+  // 木箱などの動的オブジェクト: 床との摩擦は0にして、かわりに stepGimmicks の
+  // 疑似静止摩擦（低速時の減衰）でとめる。cannon-es の箱どうしの接触摩擦は
+  // 設定値よりはるかに強く効いてしまい、キャラの力では「おせない」ため
+  world.addContactMaterial(new CANNON.ContactMaterial(objMaterial, groundMaterial, { friction: 0, restitution: 0 }));
   world.addContactMaterial(new CANNON.ContactMaterial(objMaterial, objMaterial, { friction: 0.3, restitution: 0 }));
   world.addContactMaterial(new CANNON.ContactMaterial(charMaterial, objMaterial, { friction: 0, restitution: 0 }));
   world.addContactMaterial(new CANNON.ContactMaterial(handMaterial, objMaterial, { friction: 0.8, restitution: 0 }));
@@ -1388,6 +1392,26 @@ function stepGimmicks() {
   };
   const clamp = (v, a) => Math.max(-a, Math.min(a, v));
 
+  // ── 疑似摩擦: 箱・岩の水平速度を毎ステップ一定量へらす（クーロン摩擦の再現。
+  //    床との接触摩擦は0にしてあるため）。おせばうごき、はなすとすっととまる＝HFF風
+  for (const o of dynObjects) {
+    if (!o.body || o.kinematic || o.hinge || o.rope) continue;
+    const b = o.body;
+    if (Math.abs(b.velocity.y) > 1.2) continue;      // 空中（投げた箱・落下中）はへらさない
+    const v = b.velocity;
+    const sp = Math.hypot(v.x, v.z);
+    const dec = 0.03;                                // ≒摩擦係数0.16ぶんの減速/ステップ
+    if (sp <= dec * 2) {
+      v.x = 0;
+      v.z = 0;
+      b.angularVelocity.y *= 0.8;
+    } else {
+      const f = (sp - dec) / sp;
+      v.x *= f;
+      v.z *= f;
+    }
+  }
+
   // ── 赤い押しボタン（手でおすと作動） → スライドドア ──
   for (const bt of GIM.buttons) {
     if (!bt.on) {
@@ -1428,6 +1452,7 @@ function stepGimmicks() {
   }
 
   // ── レバー式リフト: レバーをたおした向きでリフトが上下 ──
+  //    レバーは2安定式（いま命令している側へばねでもどる＝倒れっぱなしにならない）
   for (const lf of GIM.lifts) {
     const a = hingeAngle(lf.leverIdx);
     if (a > 0.3 && lf.target !== lf.y1) {
@@ -1438,28 +1463,10 @@ function stepGimmicks() {
       if (lf.moved) announce('🛗 リフトがさがる…', 'lever');
     }
     lf.moved = true;
+    const lever = dynObjects[lf.leverIdx].body;
+    const rest = lf.target === lf.y1 ? 0.45 : -0.45;
+    lever.torque.x += (rest - a) * 4 - lever.angularVelocity.x * 0.5;
     driveY(lf.liftIdx, lf.target, lf.speed || 1.1);
-  }
-
-  // ── ウィンチ: レバーをポンプするたびゴンドラが1だん上がる（ラチェット式でさがらない） ──
-  for (const wn of GIM.winches) {
-    const a = hingeAngle(wn.leverIdx);
-    if (wn.armed && a < -0.5) {
-      wn.armed = false;
-      wn.target = Math.min(wn.y1, wn.target + wn.step);
-      if (wn.msg) { announce(wn.msg, 'lever'); wn.msg = null; }
-      else Sound.play('lever');
-    } else if (!wn.armed && a > -0.12) {
-      wn.armed = true;
-    }
-    driveY(wn.liftIdx, wn.target, 0.8);
-  }
-
-  // ── ばねで定位置にもどるレバー ──
-  for (const sp of GIM.springLevers) {
-    const o = dynObjects[sp.idx];
-    const th = hingeAngle(sp.idx);
-    o.body.torque.x += (sp.rest - th) * (sp.k || 12) - o.body.angularVelocity.x * (sp.d || 0.6);
   }
 
   // ── はねばし: たれたくさり（または橋そのもの）をつかむと下りてくる。下りたらそのまま ──
@@ -1475,8 +1482,8 @@ function stepGimmicks() {
         if (pulled) break;
       }
       const target = pulled ? 0 : db.upAngle;
-      hinge.setMotorSpeed(-clamp((target - th) * 2.5, pulled ? 0.55 : 0.4));
-      if (th < 0.1) {
+      hinge.setMotorSpeed(-clamp((target - th) * 2.5, pulled ? 0.85 : 0.4));
+      if (th < 0.15) {
         db.open = true;
         announce('🌉 はねばしがおりた！おしろへ すすめ！', 'gate');
       }
