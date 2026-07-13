@@ -10,8 +10,19 @@ import * as CANNON from 'cannon-es';
 
 /* ===== 定数 ===== */
 const MAX_PLAYERS = 5;
-const GRAVITY = -18;
+const GRAVITY = -11;             // 低めの重力＝ふわっとした本家風ジャンプ・落下
 const FIXED_DT = 1 / 60;
+/* ── キャラの動きチューニング（HFF風もっさりフィール） ── */
+const WALK_SPEED = 3.4;          // 歩行最高速 m/s（2.5〜3.5）
+const WALK_ACCEL = 0.085;        // 地上の速度ブレンド係数（最高速まで~0.5秒）
+const AIR_ACCEL = 0.035;         // 空中の効きはよわめ
+const JUMP_SPEED = 4.8;          // ジャンプ初速（到達 ~1.0m）
+const HANG_JUMP = 4.4;           // ぶらさがりから跳ぶとき
+const AIR_POSTURE = 0.4;         // ジャンプ・落下中の姿勢維持は30-50%に減衰（脱力）
+const HARD_FALL_V = 7.5;         // これより速く落ちて着地→ラグドール脱力
+const LIMP_TIME = 0.8;           // 着地脱力の長さ（0.5〜1.0秒）
+const ARM_LEN = 0.72;            // うでの長さ（つかみ時のリーチ）
+const OFF_WHITE = 0xf2f0eb;      // キャラの基本色（オフホワイト）
 const FALL_Y = -8;               // 物がこれよりしずんだら持ち場へもどる
 const WATER_Y = -3.5;            // 海面の高さ（見た目のはいけい）
 const RESPAWN_Y = -2.4;          // これより落ちたらチェックポイントからやりなおし（海に落ちる前）
@@ -20,8 +31,8 @@ const SKY_LIMP = 1.35;           // 降ってくるあいだラグドール（�
 const SNAP_MS = 50;              // ホストの配信間隔 (20Hz)
 const INPUT_MS = 50;             // ゲストの入力送信間隔
 const INTERP_DELAY = 130;        // ゲスト側の補間遅延(ms)
-// スキン: 体の色 × ぼうし
-const SKIN_COLORS = [0xff6b6b, 0x4dabf7, 0x51cf66, 0xffd43b, 0xb197fc, 0xff9f43, 0x3bc9db, 0xf783ac];
+// スキン: 体の差し色（上半身の色）× ぼうし。先頭＝オフホワイト（デフォルト）
+const SKIN_COLORS = [OFF_WHITE, 0xff6b6b, 0x4dabf7, 0x51cf66, 0xffd43b, 0xb197fc, 0xff9f43, 0x3bc9db];
 const HAT_NAMES = ['なし', 'ぼうし', 'かんむり', 'ねこみみ', 'ハット'];
 function normSkin(s) {
   const c = s && Number.isFinite(+s.c) ? Math.min(SKIN_COLORS.length - 1, Math.max(0, Math.floor(+s.c))) : 0;
@@ -235,10 +246,10 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x9ed1f2);
-scene.fog = new THREE.Fog(0x9ed1f2, 38, 110);
+scene.background = new THREE.Color(0xdcebf7);              // 空ドームのそと（ほぼ見えない）
+scene.fog = new THREE.Fog(0xe6eff8, 42, 145);              // 遠くは空にとける
 
-const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 240);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 240); // FOV 50-60°（本家風）
 
 function onResize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -249,9 +260,11 @@ function onResize() {
 window.addEventListener('resize', onResize);
 onResize();
 
-scene.add(new THREE.HemisphereLight(0xdff1ff, 0x9db878, 0.85));
-const sun = new THREE.DirectionalLight(0xfff4d6, 1.4);
-sun.position.set(-18, 34, 14);
+/* やわらかい太陽光（暖色 #FFF4E0・強度~1.0）＋空色→地面色のヘミライト。
+   陰影のコントラストは弱めにして「おもちゃ/ジオラマ」の質感に */
+scene.add(new THREE.HemisphereLight(0xc3dcf2, 0xd9c9ae, 0.95));
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.0);
+sun.position.set(-22, 38, -6);
 sun.castShadow = true;
 const shadowRes = IS_TOUCH ? 1024 : 2048;
 sun.shadow.mapSize.set(shadowRes, shadowRes);
@@ -259,64 +272,50 @@ sun.shadow.camera.left = -60;
 sun.shadow.camera.right = 60;
 sun.shadow.camera.top = 70;
 sun.shadow.camera.bottom = -50;
-sun.shadow.camera.far = 140;
-sun.target.position.set(4, 0, 38);
+sun.shadow.camera.far = 150;
+sun.shadow.bias = -0.0004;
+sun.target.position.set(0, 0, 30);
 scene.add(sun, sun.target);
 
 /* =====================================================================
    コース（見た目はすぐ作る。物理ボディはホスト開始時に作る）
+   手作りのパズルレベル3本: ゆめのおうち / こうじげんば / ゆめのおしろ
+   （どのレベルも「ゆめの中の浮き島」。正攻法と力技の複数解を用意する）
    ===================================================================== */
-const staticDefs = [];  // {w,h,d,x,y,z,rotX, belt?, bounce?}
-const dynObjects = [];  // {mesh, kind:'box'|'sphere'|'platform', size|radius, mass, home:{p,q?}, body:null, kinematic?, rope?, hinge?}
-const GIM = { pendulums: [], rods: [] }; // ギミックの定義（rods: 見た目のワイヤー/棒）
+const staticDefs = [];  // {w,h,d,x,y,z,rotX, bounce?}
+const dynObjects = [];  // {mesh, kind:'box'|'sphere', size|radius, mass, home:{p,q?}, body, kinematic?, rope?, hinge?}
+const GIM = {};         // ギミック定義（buildLevel がコースごとに初期化する）
 let levelRoot = new THREE.Group();       // コースの見た目はすべてこの下（コース切替で破棄）
 scene.add(levelRoot);
 
+/* 単色フラット（Lambert）・彩度低めのパステル。本家風の「おもちゃ/ジオラマ」感 */
 const MAT = {
-  grass: new THREE.MeshStandardMaterial({ color: 0x7ec850, roughness: 0.9 }),
-  dirt: new THREE.MeshStandardMaterial({ color: 0xb08558, roughness: 1 }),
-  wood: new THREE.MeshStandardMaterial({ color: 0xd9a05b, roughness: 0.8 }),
-  crate: new THREE.MeshStandardMaterial({ color: 0xe0b070, roughness: 0.7 }),
-  stone: new THREE.MeshStandardMaterial({ color: 0xb9c4cf, roughness: 0.85 }),
-  ball: new THREE.MeshStandardMaterial({ color: 0xff8fb3, roughness: 0.5 }),
-  plat: new THREE.MeshStandardMaterial({ color: 0x6cc7d8, roughness: 0.6 }),
-  iron: new THREE.MeshStandardMaterial({ color: 0x5a6672, roughness: 0.35, metalness: 0.5 }),
-  brick: new THREE.MeshStandardMaterial({ color: 0xd9705a, roughness: 0.85 }),
-  rope: new THREE.MeshStandardMaterial({ color: 0x8a6242, roughness: 1 }),
-  button: new THREE.MeshStandardMaterial({ color: 0xe03131, roughness: 0.5 }),
-  gate: new THREE.MeshStandardMaterial({ color: 0x8d7bc4, roughness: 0.6 }),
-  tram: new THREE.MeshStandardMaterial({ color: 0xf783ac, roughness: 0.55 }),
-  flag: new THREE.MeshStandardMaterial({ color: 0xffd43b, roughness: 0.6, side: THREE.DoubleSide }),
-  cloud: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }),
-  trunk: new THREE.MeshStandardMaterial({ color: 0x8a6242, roughness: 1 }),
-  leaf: new THREE.MeshStandardMaterial({ color: 0x4fae5c, roughness: 0.9 }),
-  // 工場コース用
-  metal: new THREE.MeshStandardMaterial({ color: 0x8a95a3, roughness: 0.45, metalness: 0.6 }),
-  metalDark: new THREE.MeshStandardMaterial({ color: 0x5b636e, roughness: 0.5, metalness: 0.6 }),
-  hazard: new THREE.MeshStandardMaterial({ color: 0xf0a020, roughness: 0.6 }),
-  piston: new THREE.MeshStandardMaterial({ color: 0xe8543f, roughness: 0.4, metalness: 0.3 }),
-  fan: new THREE.MeshStandardMaterial({ color: 0x74c0fc, roughness: 0.4, transparent: true, opacity: 0.55 }),
+  grass: new THREE.MeshLambertMaterial({ color: 0xaad391 }),     // あわい草いろ
+  dirt: new THREE.MeshLambertMaterial({ color: 0xb08a63 }),      // 浮き島の土の断面
+  dirtDark: new THREE.MeshLambertMaterial({ color: 0x91704f }),
+  wood: new THREE.MeshLambertMaterial({ color: 0xe8d2a8 }),      // 木＝明るいベージュ
+  woodDark: new THREE.MeshLambertMaterial({ color: 0xcfae7d }),
+  crate: new THREE.MeshLambertMaterial({ color: 0xdfb87f }),
+  plaster: new THREE.MeshLambertMaterial({ color: 0xf4f0e7 }),   // 白かべ
+  stone: new THREE.MeshLambertMaterial({ color: 0xc9cfd6 }),     // 石＝ライトグレー
+  stoneDark: new THREE.MeshLambertMaterial({ color: 0xa9b2bc }),
+  roof: new THREE.MeshLambertMaterial({ color: 0xdb937f }),      // 屋根（くすんだ赤）
+  red: new THREE.MeshLambertMaterial({ color: 0xe05a4e }),       // 差し色の赤（ガジェット）
+  blue: new THREE.MeshLambertMaterial({ color: 0x6b99d8 }),      // 差し色の青（ガジェット）
+  iron: new THREE.MeshLambertMaterial({ color: 0x8d99a6 }),
+  ironDark: new THREE.MeshLambertMaterial({ color: 0x6d7883 }),
+  hazard: new THREE.MeshLambertMaterial({ color: 0xf2c14e }),    // 工事の黄いろ
+  orange: new THREE.MeshLambertMaterial({ color: 0xefa25f }),    // 工事のオレンジ
+  concrete: new THREE.MeshLambertMaterial({ color: 0xd6d3ca }),
+  brick: new THREE.MeshLambertMaterial({ color: 0xdaa089 }),
+  flag: new THREE.MeshLambertMaterial({ color: 0xe86a5e, side: THREE.DoubleSide }),
+  cloud: new THREE.MeshLambertMaterial({ color: 0xffffff }),
+  leaf: new THREE.MeshLambertMaterial({ color: 0x93c98d }),
+  trunk: new THREE.MeshLambertMaterial({ color: 0xb08b62 }),
 };
 
-// ベルトコンベア（縞テクスチャをスクロールさせて流れを見せる）
-let beltTex;
-{
-  const cv = document.createElement('canvas');
-  cv.width = 64; cv.height = 64;
-  const c = cv.getContext('2d');
-  c.fillStyle = '#3a4149';
-  c.fillRect(0, 0, 64, 64);
-  c.fillStyle = '#ffd43b';
-  c.beginPath();
-  c.moveTo(12, 40); c.lineTo(32, 20); c.lineTo(52, 40);
-  c.lineTo(52, 50); c.lineTo(32, 32); c.lineTo(12, 50);
-  c.closePath();
-  c.fill();
-  beltTex = new THREE.CanvasTexture(cv);
-  beltTex.wrapS = beltTex.wrapT = THREE.RepeatWrapping;
-  beltTex.repeat.set(1, 5);
-  MAT.belt = new THREE.MeshStandardMaterial({ map: beltTex, roughness: 0.8 });
-}
+// 旧コンベア用テクスチャの名残（メインループが offset を動かすため入れ物だけ残す）
+const beltTex = new THREE.Texture();
 
 function staticBox(w, h, d, x, y, z, mat, rotX = 0, opts = null) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -334,6 +333,7 @@ function staticBox(w, h, d, x, y, z, mat, rotX = 0, opts = null) {
 // キネマティック（ホストが動かす）オブジェクトを登録して index を返す
 function kinObject(mesh, kind, sizeOrRadius, home) {
   mesh.castShadow = true;
+  mesh.receiveShadow = true;
   levelRoot.add(mesh);
   const o = { mesh, kind, mass: 0, kinematic: true, home: { p: home }, body: null };
   if (kind === 'sphere') o.radius = sizeOrRadius;
@@ -344,23 +344,12 @@ function kinObject(mesh, kind, sizeOrRadius, home) {
 }
 
 // 見た目だけのワイヤー/棒（毎フレーム2点間に張りなおす）
-function addRod(fromPointOrIdx, toIdx, radius, mat) {
+// from / to: [x,y,z]（固定点） or 数値（dynObjects の index） or {i, off}（物のローカル点）
+function addRod(from, to, radius, mat) {
   const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1, 6), mat);
   mesh.castShadow = true;
   levelRoot.add(mesh);
-  GIM.rods.push({ mesh, from: fromPointOrIdx, toIdx });
-}
-
-// よじ登りかべ: 高さ topY のかべ。手前(-z)からジャンプしてふちに手をかけ、
-//   体をひきあげて のりこえる（本家風）。のぼると奥(+z)の床(perch)に立てる
-function climbWall(x, z, topY, w, mat = MAT.stone) {
-  staticBox(w, topY, 0.35, x, topY / 2, z, mat);                // うすいかべ本体（乗りこえやすく）
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(w * 0.96, 0.13, 0.16), MAT.flag); // 前がわ上端のグリップ
-  bar.position.set(x, topY, z - 0.22);
-  bar.castShadow = true;
-  levelRoot.add(bar);
-  staticBox(w, 0.4, 2.4, x, topY - 0.2, z + 1.3, mat);          // かべの上の床（上面がかべ天とツライチ・すぐ奥）
-  (GIM.climbs || (GIM.climbs = [])).push({ x, z, topY, w });    // デバッグ/検証用の記録
+  GIM.rods.push({ mesh, from, to });
 }
 
 // ヒンジ（ちょうつがい）つきの板・とびら・レバーなど。index を返す
@@ -393,60 +382,149 @@ function hingeAngle(idx) {
   return 2 * Math.atan2(dot, q.w);
 }
 
-// 島（草の天板つき）— topY が上面の高さ
-function island(w, d, x, topY, z) {
-  staticBox(w, 0.3, d, x, topY - 0.15, z, MAT.grass);
-  staticBox(w, 1.3, d, x, topY - 0.3 - 0.65, z, MAT.dirt);
-}
-
-function dynBox(w, h, d, x, y, z, mat, mass, buoy = 0) {
+function dynBox(w, h, d, x, y, z, mat, mass, opts = {}) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
   m.castShadow = true;
   m.receiveShadow = true;
   levelRoot.add(m);
-  dynObjects.push({ mesh: m, kind: 'box', size: [w, h, d], mass, buoy, home: { p: [x, y, z] }, body: null });
-  return m;
+  dynObjects.push({ mesh: m, kind: 'box', size: [w, h, d], mass, home: { p: [x, y, z] }, body: null, ...opts });
+  return dynObjects.length - 1;
+}
+
+/* ── 浮き島: 上面＋土の断面（側面・裏面）＋すぼまった底。下から見ても島に見える ── */
+function islandBox(w, d, x, topY, z, topMat = MAT.grass, topH = 0.3) {
+  staticBox(w, topH, d, x, topY - topH / 2, z, topMat);
+  staticBox(w, 1.15, d, x, topY - topH - 0.575, z, MAT.dirt);      // 断面（茶）
+  const taper = new THREE.Mesh(new THREE.BoxGeometry(w * 0.68, 1.5, d * 0.68), MAT.dirtDark);
+  taper.position.set(x, topY - topH - 1.15 - 0.7, z);
+  taper.castShadow = true;
+  levelRoot.add(taper);                                            // 底のすぼまり（見た目のみ）
+}
+
+/* ── くさり/ロープ: 固定点 or 物のローカル点からぶら下がる。先端に鉄球もつけられる ──
+   from: {anchor:[x,y,z]} または {idx, local:[x,y,z]} / opts: {ball:{r,mass,mat}, grip, linkMass} */
+function chain(from, n, spacing, opts = {}) {
+  let sx, sy, sz;
+  if (from.anchor) {
+    [sx, sy, sz] = from.anchor;
+  } else {
+    const o = dynObjects[from.idx];
+    const q = new THREE.Quaternion(...(o.home.q || [0, 0, 0, 1]));
+    const off = new THREE.Vector3(...from.local).applyQuaternion(q);
+    sx = o.home.p[0] + off.x; sy = o.home.p[1] + off.y; sz = o.home.p[2] + off.z;
+  }
+  const links = [];
+  for (let i = 0; i < n; i++) {
+    const isBall = i === n - 1 && opts.ball;
+    const isGrip = i === n - 1 && opts.grip;
+    const r = isBall ? opts.ball.r : isGrip ? 0.17 : 0.1;
+    const mass = isBall ? opts.ball.mass : isGrip ? 2 : (opts.linkMass || 1.2);
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(Math.max(r, 0.11), isBall ? 16 : 8, isBall ? 12 : 6),
+      isBall ? (opts.ball.mat || MAT.ironDark) : MAT.ironDark,
+    );
+    m.castShadow = true;
+    levelRoot.add(m);
+    const y = sy - spacing * (i + 1) - (isBall ? opts.ball.r * 0.6 : 0);
+    m.position.set(sx, y, sz);
+    dynObjects.push({ mesh: m, kind: 'sphere', radius: r, mass, rope: true, home: { p: [sx, y, sz] }, body: null });
+    links.push(dynObjects.length - 1);
+  }
+  GIM.chains.push({ anchor: from.anchor, attachIdx: from.idx, attachLocal: from.local, links, spacing });
+  let prev = from.anchor ? from.anchor : { i: from.idx, off: from.local };
+  for (const li of links) { addRod(prev, li, 0.045, MAT.ironDark); prev = li; }
+  return links;
+}
+
+/* ── かべビルダー: 開口部（ドア・まど）つきのかべを箱の組合せで作る ── */
+// z一定のかべ（x0..x1, yBase..yBase+h）。openings: [{x0,x1,y0,y1}]
+function wallZ(z, x0, x1, yBase, h, mat, openings = [], th = 0.3) {
+  const segs = [];
+  let cur = x0;
+  for (const op of [...openings].sort((a, b) => a.x0 - b.x0)) {
+    if (op.x0 > cur) segs.push({ a0: cur, a1: op.x0, y0: yBase, y1: yBase + h });
+    if (op.y0 > yBase) segs.push({ a0: op.x0, a1: op.x1, y0: yBase, y1: op.y0 });
+    if (op.y1 < yBase + h) segs.push({ a0: op.x0, a1: op.x1, y0: op.y1, y1: yBase + h });
+    cur = op.x1;
+  }
+  if (cur < x1) segs.push({ a0: cur, a1: x1, y0: yBase, y1: yBase + h });
+  for (const s of segs) staticBox(s.a1 - s.a0, s.y1 - s.y0, th, (s.a0 + s.a1) / 2, (s.y0 + s.y1) / 2, z, mat);
+}
+// x一定のかべ（z0..z1）。openings: [{z0,z1,y0,y1}]
+function wallX(x, z0, z1, yBase, h, mat, openings = [], th = 0.3) {
+  const segs = [];
+  let cur = z0;
+  for (const op of [...openings].sort((a, b) => a.z0 - b.z0)) {
+    if (op.z0 > cur) segs.push({ a0: cur, a1: op.z0, y0: yBase, y1: yBase + h });
+    if (op.y0 > yBase) segs.push({ a0: op.z0, a1: op.z1, y0: yBase, y1: op.y0 });
+    if (op.y1 < yBase + h) segs.push({ a0: op.z0, a1: op.z1, y0: op.y1, y1: yBase + h });
+    cur = op.z1;
+  }
+  if (cur < z1) segs.push({ a0: cur, a1: z1, y0: yBase, y1: yBase + h });
+  for (const s of segs) staticBox(th, s.y1 - s.y0, s.a1 - s.a0, x, (s.y0 + s.y1) / 2, (s.a0 + s.a1) / 2, mat);
+}
+
+/* ── ちいさな部品 ── */
+function stairs(n, rise, run, w, mat, x, y0, z0, along = 'z', dir = 1) {
+  for (let i = 0; i < n; i++) {
+    const y = y0 + rise * (i + 1);
+    if (along === 'z') staticBox(w, 0.24, run + 0.08, x, y - 0.12, z0 + dir * run * (i + 0.5), mat);
+    else staticBox(run + 0.08, 0.24, w, x + dir * run * (i + 0.5), y - 0.12, z0, mat);
+  }
 }
 
 function tree(x, z, y = 0, s = 1) {
   const g = new THREE.Group();
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14 * s, 0.2 * s, 0.9 * s, 8), MAT.trunk);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14 * s, 0.2 * s, 0.9 * s, 7), MAT.trunk);
   trunk.position.y = 0.45 * s;
-  const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.8 * s, 1.6 * s, 9), MAT.leaf);
+  const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.85 * s, 0), MAT.leaf);
   leaf.position.y = 1.5 * s;
+  leaf.scale.y = 1.25;
   trunk.castShadow = leaf.castShadow = true;
   g.add(trunk, leaf);
   g.position.set(x, y, z);
   levelRoot.add(g);
 }
 
-function pennant(x, y, z, color) {
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.6, 8), MAT.stone);
-  pole.position.set(x, y + 0.8, z);
+function goalFlag(x, y, z) {
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 2.9, 8), MAT.ironDark);
+  pole.position.set(x, y + 1.45, z);
   pole.castShadow = true;
-  const flag = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.7, 4), new THREE.MeshStandardMaterial({ color, roughness: 0.6 }));
-  flag.rotation.z = -Math.PI / 2;
-  flag.position.set(x + 0.4, y + 1.4, z);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.25, 0.78), MAT.flag);
+  flag.position.set(x + 0.65, y + 2.4, z);
   levelRoot.add(pole, flag);
 }
 
-// 壁こわし用などの大玉（水にうく）
-function bigBall(x, y, z) {
-  const r = 0.7;
-  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), MAT.ball);
-  m.position.set(x, y, z);
-  m.castShadow = m.receiveShadow = true;
-  levelRoot.add(m);
-  dynObjects.push({ mesh: m, kind: 'sphere', radius: r, mass: 6, buoy: 1.15, home: { p: [x, y, z] }, body: null });
+function banner(x, y, z, mat = MAT.red) {
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 1.7, 6), MAT.woodDark);
+  pole.position.set(x, y + 0.85, z);
+  pole.castShadow = true;
+  const fl = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.66, 4), mat);
+  fl.rotation.z = -Math.PI / 2;
+  fl.position.set(x + 0.38, y + 1.5, z);
+  levelRoot.add(pole, fl);
 }
 
-/* =====================================================================
-   コース生成：たくさんの区間(セグメント)をつなげて、長く・むずかしくする
-   （区間ごとに幅がせまく・すきまが広く・ギミックが速くなっていく）
-   ===================================================================== */
+function trafficCone(x, z, y = 0) {
+  const c = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.52, 9), MAT.orange);
+  c.position.set(x, y + 0.29, z);
+  c.castShadow = true;
+  const b = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.07, 0.48), MAT.orange);
+  b.position.set(x, y + 0.035, z);
+  levelRoot.add(c, b);
+}
 
-// 決定的な乱数（コースごとに固定のレイアウトになる）
+function crenels(x, y, z, len, along = 'x') {
+  const n = Math.max(1, Math.floor(len / 1.15));
+  for (let i = 0; i < n; i += 2) {
+    const off = -len / 2 + (i + 0.5) * 1.15;
+    if (along === 'x') staticBox(0.85, 0.55, 0.35, x + off, y + 0.275, z, MAT.stoneDark);
+    else staticBox(0.35, 0.55, 0.85, x, y + 0.275, z + off, MAT.stoneDark);
+  }
+}
+
+// 決定的な乱数（かざりの浮き島の配置用。ホスト/ゲストで同じ見た目になる）
 function makeRng(seed) {
   let s = seed >>> 0;
   return () => {
@@ -458,230 +536,390 @@ function makeRng(seed) {
   };
 }
 
-// ── 部品ビルダー（既存のギミックのしくみを使う） ──
-function gimSweeper(x, z, w, omega) {
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 1.4, 10), MAT.stone);
-  pole.position.set(x, 0.7, z); pole.castShadow = true; levelRoot.add(pole);
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(w, 0.35, 0.35), MAT.plat);
-  const idx = kinObject(bar, 'box', [w, 0.35, 0.35], [x, 0.62, z]);
-  GIM.sweepers.push({ idx, omega });
-}
-function gimPendulum(x, z, omega, phase) {
-  const pivotY = 4.6, L = 3.4;
-  staticBox(0.4, 0.4, 0.4, x, pivotY, z, MAT.stone);
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.6, 14, 10), MAT.iron);
-  const idx = kinObject(ball, 'sphere', 0.6, [x, pivotY - L, z]);
-  GIM.pendulums.push({ idx, pivot: [x, pivotY, z], L, omega, phase });
-  addRod([x, pivotY, z], idx, 0.05, MAT.iron);
-}
-function gimPiston(x, z, dir, period, phase) {
-  staticBox(0.7, 1.6, 1.4, x, 0.55, z, MAT.metalDark);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 1.0), MAT.piston);
-  const base = x - dir * 0.5;
-  const idx = kinObject(head, 'box', [0.8, 0.8, 1.0], [base, 0.7, z]);
-  GIM.pistons.push({ idx, axis: 'x', base, reach: 2.4, dir, period, phase });
-}
-function gimCrusher(x, z, w, period, phase) {
-  staticBox(w + 0.8, 0.4, 0.5, x, 5.2, z, MAT.metalDark);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(w, 1.4, 1.6), MAT.piston);
-  const idx = kinObject(head, 'box', [w, 1.4, 1.6], [x, 4.3, z]);
-  GIM.crushers.push({ idx, top: 4.3, drop: 3.2, period, phase });
-}
-function gimTurntable(x, z, r, omega) {
-  staticBox(0.5, 1.0, 0.5, x, -0.5, z, MAT.metalDark);
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.3, 28), MAT.plat);
-  const idx = kinObject(disc, 'box', [r * 1.7, 0.3, r * 1.7], [x, -0.15, z]);
-  dynObjects[idx].spin = omega; dynObjects[idx].spinCenter = [x, z];
-  const mark = new THREE.Mesh(new THREE.BoxGeometry(r * 2, 0.12, 0.4), MAT.hazard);
-  mark.position.y = 0.2; disc.add(mark);
-  GIM.turntables.push({ idx, omega });
-}
-function gimFerry(z, w, amp, omega) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.4, 3.0), MAT.plat);
-  m.receiveShadow = true;
-  const idx = kinObject(m, 'platform', [w, 0.4, 3.0], [0, -0.2, z]);
-  GIM.platforms.push({ idx, axis: 'z', base: z, amp, omega, phase: -Math.PI / 2 }); // 手前からスタート
+// とおくに浮かぶ かざりの小島
+function isletDeco(seed, n, zMax) {
+  const rng = makeRng(seed);
+  for (let i = 0; i < n; i++) {
+    const x = (rng() < 0.5 ? -1 : 1) * (16 + rng() * 18);
+    const z = -10 + rng() * (zMax + 20);
+    const y = rng() < 0.35 ? 5 + rng() * 7 : -4 - rng() * 6;
+    const s = 2.6 + rng() * 3.2;
+    islandBox(s, s * (0.8 + rng() * 0.5), x, y, z);
+    if (rng() < 0.7) tree(x + (rng() - 0.5) * s * 0.4, z + (rng() - 0.5) * s * 0.4, y, 0.8 + rng() * 0.6);
+  }
 }
 
-// ── 区間(セグメント)ビルダー：cz(いまの床の先端)から作って、あたらしいczを返す ──
-const SEG = {
-  walk: (cz, w, d, rng, t) => { const len = 6 + rng() * 4; t.floor(cz, len, w); return cz + len; },
-  gap: (cz, w, d, rng, t) => {
-    const gap = 1.6 + d * 1.2 + rng() * 0.3;   // 1.6 → ~3.1
-    const land = 5 + rng() * 3;
-    t.floor(cz + gap, land, w);
-    return cz + gap + land;
-  },
-  sweeper: (cz, w, d, rng, t) => {
-    const len = 8; t.floor(cz, len, w);
-    gimSweeper(0, cz + len / 2, Math.min(w + 2.6, 7.2), 1.1 + d * 1.5);
-    return cz + len;
-  },
-  pendulum: (cz, w, d, rng, t) => {
-    const len = 9; t.floor(cz, len, Math.max(1.7, w - 0.6));
-    const n = 2 + Math.floor(d * 2.2);
-    for (let k = 0; k < n; k++) gimPendulum(0, cz + 2 + k * (len - 3.5) / Math.max(1, n - 1), 1.05 + d * 0.65, rng() * 6.28);
-    return cz + len;
-  },
-  pistons: (cz, w, d, rng, t) => {
-    const len = 9; const bw = Math.max(1.8, w - 0.4); t.floor(cz, len, bw);
-    const n = 2 + Math.floor(d * 2.2);
-    const wallX = bw / 2 + 0.35;
-    for (let k = 0; k < n; k++) gimPiston((k % 2 ? wallX : -wallX), cz + 2 + k * (len - 3.5) / Math.max(1, n - 1), (k % 2 ? -1 : 1), 2.7 - d * 1.0, rng() * 3);
-    return cz + len;
-  },
-  crusher: (cz, w, d, rng, t) => {
-    const len = 10; t.floor(cz, len, w);
-    const n = 2 + Math.floor(d * 2);
-    for (let k = 0; k < n; k++) gimCrusher(0, cz + 2.5 + k * (len - 4.5) / Math.max(1, n - 1), Math.min(w + 0.4, 3.8), 3.0 - d * 1.1, rng() * 3);
-    return cz + len;
-  },
-  belt: (cz, w, d, rng, t) => {
-    const len = 7;
-    staticBox(w, 0.4, len, 0, -0.2, cz + len / 2, MAT.belt, 0, { belt: [0, 0, -(2.0 + d * 1.3)] });
-    staticBox(0.28, 0.34, len, -(w / 2 - 0.14), 0.17, cz + len / 2, MAT.stone);
-    staticBox(0.28, 0.34, len, (w / 2 - 0.14), 0.17, cz + len / 2, MAT.stone);
-    return cz + len;
-  },
-  stones: (cz, w, d, rng, t) => {
-    const n = 3 + Math.floor(d * 2);
-    let z = cz;
-    for (let k = 0; k < n; k++) {
-      z += 1.3 + d * 0.9;
-      const s = 2.2 - d * 0.6;
-      staticBox(s, 0.6, s, 0, -0.3, z + s / 2, MAT.stone);
-      z += s;
-    }
-    t.floor(z + 1.2, 5, w); return z + 1.2 + 5;
-  },
-  turntables: (cz, w, d, rng, t) => {
-    let z = cz + 0.8; const r = 2.5 - d * 0.5;
-    for (let k = 0; k < 2; k++) { gimTurntable(0, z + r, r, (k % 2 ? -1 : 1) * (0.55 + d * 0.5)); z += r * 2 - 0.6; }
-    t.floor(z + 0.8, 5, w); return z + 0.8 + 5;
-  },
-  ferry: (cz, w, d, rng, t) => {
-    const gap = 6 + d * 3;
-    gimFerry(cz + gap / 2, Math.min(w, 3.2), gap / 2 - 0.4, 0.5 + d * 0.25);
-    t.floor(cz + gap, 5, w); return cz + gap + 5;
-  },
-  trampoline: (cz, w, d, rng, t) => {
-    t.floor(cz, 2, w);
-    staticBox(2.4, 0.5, 2.4, 0, -0.02, cz + 1, MAT.tram, 0, { bounce: 13 });
-    const gap = 3.4 + d * 1.2;
-    t.floor(cz + 2 + gap, 5, w); return cz + 2 + gap + 5;
-  },
-  climb: (cz, w, d, rng, t) => {
-    t.floor(cz, 3, w);                 // 助走
-    const h = 1.0 + d * 0.35;          // 1.0 → 1.35（乗りこえられる高さ）
-    climbWall(0, cz + 3.5, h, Math.min(w, 3.2));
-    t.floor(cz + 5.6, 5, w); return cz + 5.6 + 5;  // かべの おく の床
-  },
-};
+/* ── ギミック部品 ── */
+// 赤い押しボタン（手でおすと作動）＋スライドするとびら
+function gimButtonDoor(btnPos, doorHome, doorSize, openY, msg, doorMat = MAT.red) {
+  staticBox(0.36, btnPos[1] - 0.18, 0.36, btnPos[0], (btnPos[1] - 0.18) / 2 + 0.02, btnPos[2], MAT.ironDark); // だい
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.23, 0.28, 12), MAT.red);
+  const capIdx = kinObject(cap, 'box', [0.42, 0.28, 0.42], btnPos);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(...doorSize), doorMat);
+  const doorIdx = kinObject(door, 'box', doorSize, doorHome);
+  GIM.buttons.push({ capIdx, pos: [...btnPos], doorIdx, homeY: doorHome[1], openY, msg });
+  return doorIdx;
+}
 
-function genCourse(theme) {
-  const rng = makeRng(theme.seed);
-  const cps = [{ x: 0, y: 1.1, z: 1 }]; // cp0 = スタート
-  const zones = [];
-  let cpN = 1;
-  theme.floor(-3, 8.5, 6.5);            // スタート広場
-  if (theme.decorate) theme.decorate(rng);
-  let cz = 5.5;
-  let sinceCp = 0;
-  const N = theme.segments;
-  const pool = theme.pool;
-  for (let i = 0; i < N; i++) {
-    const d = i / (N - 1);                       // 難易度 0..1
-    const w = 4.4 - d * 2.9;                      // 幅 4.4 → 1.5
-    let type;
-    if (i < 3) type = ['walk', 'gap', 'sweeper'][i]; // さいしょは やさしめ（歩く→すきま→回転バー）
-    else type = pool[Math.floor(rng() * pool.length)];
-    cz = SEG[type](cz, w, d, rng, theme);
-    sinceCp++;
-    if (sinceCp >= theme.cpEvery && i < N - 3) {
-      theme.floor(cz, 5.5, 5.5);                  // 休憩＝チェックポイント（数すくなめ）
-      cz += 5.5;
-      cps.push({ x: 0, y: 1.1, z: cz - 2.75 });
-      zones.push({ cp: cpN, x0: -3.2, x1: 3.2, z0: cz - 5.5, z1: cz, yMin: -1 });
-      cpN++; sinceCp = 0;
+// 床スイッチ（おもみで作動）＋スライドするとびら
+function gimPadDoor(padPos, doorHome, doorSize, openY, msg, doorMat = MAT.blue) {
+  // わく（上面は床とツライチ＝箱をおしてそのまま乗せられる）
+  staticBox(2.0, 0.06, 2.0, padPos[0], padPos[1] + 0.04, padPos[2], MAT.ironDark);
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.14, 1.7), MAT.blue);
+  const padIdx = kinObject(pad, 'box', [1.7, 0.14, 1.7], [padPos[0], padPos[1], padPos[2]]);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(...doorSize), doorMat);
+  const doorIdx = kinObject(door, 'box', doorSize, doorHome);
+  GIM.pads.push({ padIdx, gateIdx: doorIdx, padPos: [padPos[0], padPos[1] + 0.07, padPos[2]], padHomeY: padPos[1], gateHomeY: doorHome[1], gateOpenY: openY, msg });
+  return doorIdx;
+}
+
+// レバー（ヒンジ棒）を作って index を返す
+function gimLever(x, y, z, angle0 = 0, opts = {}) {
+  const baseY = opts.baseY || 0;
+  const postH = Math.max(0.2, y - baseY - 0.1);
+  // 支柱はよこにオフセット（レバーをおし切るとき体がぶつからない）＋じくの見た目
+  staticBox(0.14, postH, 0.14, x + 0.32, baseY + postH / 2, z, MAT.ironDark);
+  const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.42, 8), MAT.ironDark);
+  axle.rotation.z = Math.PI / 2;
+  axle.position.set(x + 0.18, y, z);
+  axle.castShadow = true;
+  levelRoot.add(axle);
+  // 長めのバー＋低めの支点＝体でおしても、つかんでひいても動かせる
+  const idx = hingedBox(0.1, 1.0, 0.1, MAT.red, 0.8, [x, y, z], [0, -0.42, 0], [1, 0, 0], angle0,
+    { angularDamping: 0.5 });
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), MAT.red);
+  knob.position.y = 0.48;
+  dynObjects[idx].mesh.add(knob);
+  return idx;
+}
+
+/* =====================================================================
+   コース1「ゆめのおうち」— チュートリアル（邸宅風・5分規模）
+   おす→ボタン→はこ運び→つみ上げ→やねのゴール、の順に基本操作を学ぶ
+   ===================================================================== */
+function buildCourse1() {
+  const H = 3.6;                                   // 部屋の高さ
+  // ── 浮き島（にわ＋いえ）──
+  islandBox(15, 47, 0, 0, 17.5);                   // z -6 .. 41
+  tree(-6, -3.5, 0, 1.1); tree(6.2, -2.5, 0, 0.9); tree(-6.4, 39.5, 0, 1.0); tree(6.4, 39, 0, 0.85);
+  banner(-2.6, 0, -2.2, MAT.blue); banner(2.6, 0, -2.2, MAT.red);
+  staticBox(10.6, 0.14, 33, 0, 0.07, 20.5, MAT.wood);   // いえの木の床（上面 y0.14, z 4..37）
+
+  // ── まえのかべ（z4）: おしてあけるドア（ヒンジ・①） ──
+  wallZ(4, -5.3, 5.3, 0, H, MAT.plaster, [{ x0: -0.9, x1: 0.9, y0: 0, y1: 2.35 }]);
+  hingedBox(1.66, 2.1, 0.1, MAT.woodDark, 4, [-0.87, 1.27, 4], [-0.8, 0, 0], [0, 1, 0], 0, { angularDamping: 0.7 });
+  // よこのかべ: 大きなまど穴（まどから外へ出る力技ルートもOK）
+  const win = (z) => ({ z0: z, z1: z + 2.6, y0: 0.95, y1: 2.5 });
+  wallX(-5.15, 4, 37, 0, H, MAT.plaster, [win(7.5), win(18.5), win(28)]);
+  wallX(5.15, 4, 37, 0, H, MAT.plaster, [win(7.5), win(18.5), win(28)]);
+  wallZ(37, -5.3, 5.3, 0, H, MAT.plaster);         // うしろのかべ
+
+  // ── 部屋A（z4..15）: 家具とあそべる小箱 ──
+  staticBox(1.7, 0.78, 0.9, -3.6, 0.53, 9, MAT.woodDark);        // テーブル
+  dynBox(0.5, 0.5, 0.5, -3.6, 1.2, 9, MAT.blue, 6, { noSleep: true });              // つみき
+  dynBox(0.55, 0.55, 0.55, 3.4, 0.45, 7.5, MAT.crate, 10, { noSleep: true });       // 小さなはこ
+
+  // ── かべ z15: 赤い押しボタン（②）でひらくスライドドア ──
+  wallZ(15, -5.3, 5.3, 0, H, MAT.plaster, [{ x0: -1.0, x1: 1.0, y0: 0, y1: 2.45 }]);
+  gimButtonDoor([2.1, 1.3, 14.35], [0, 1.41, 15], [2.1, 2.55, 0.22], -1.3,
+    '🔴 ボタンをおした！あかいドアがひらく…');
+
+  // ── 部屋B（z15..26）: 木箱を床スイッチへ（③） ──
+  wallZ(26, -5.3, 5.3, 0, H, MAT.plaster, [{ x0: -1.0, x1: 1.0, y0: 0, y1: 2.45 }]);
+  gimPadDoor([2.6, 0.07, 22.3], [0, 1.41, 26], [2.1, 2.55, 0.22], -1.3,
+    '⚖️ おもみで あおいとびらがひらいた！（はなれると しまるよ）');
+  dynBox(0.72, 0.72, 0.72, 0.8, 0.55, 20, MAT.crate, 12, { noSleep: true });        // 木箱（スイッチ用）
+  dynBox(0.72, 0.72, 0.72, -1.6, 0.55, 20.5, MAT.crate, 12, { noSleep: true });
+
+  // ── 部屋C（z26..37）: はこをつんで たかい棚（ロフト 1.95m）へ（④） ──
+  staticBox(10.6, 0.2, 6, 0, 1.85, 34, MAT.wood);                // ロフト（上面 y1.95）
+  staticBox(2.2, 0.95, 0.8, -4.0, 0.62, 30.4, MAT.woodDark);     // たんす（とちゅうの足場）
+  dynBox(0.72, 0.72, 0.72, 2.5, 0.55, 28, MAT.crate, 12, { noSleep: true });        // つみ上げ用の木箱
+  dynBox(0.72, 0.72, 0.72, 3.4, 0.55, 29, MAT.crate, 12, { noSleep: true });
+
+  // ── ロフト → やね: 階段箱で屋根の穴から外へ（⑤） ──
+  staticBox(1.6, 0.5, 1.1, 3.0, 2.2, 31.9, MAT.woodDark);        // だん1（上面2.45）
+  staticBox(1.6, 0.5, 1.1, 3.0, 2.75, 33.0, MAT.woodDark);       // だん2（上面3.0）
+  // やね（上面 y3.9。ロフトの上 z31.2..33.8 x1.2..4.8 に穴）
+  staticBox(10.6, 0.3, 27.2, 0, 3.75, 17.6, MAT.roof);           // z 4..31.2
+  staticBox(6.5, 0.3, 2.6, -2.05, 3.75, 32.5, MAT.roof);         // 穴のよこ（x -5.3..1.2）
+  staticBox(0.5, 0.3, 2.6, 5.05, 3.75, 32.5, MAT.roof);          // 穴のよこ（x 4.8..5.3）
+  staticBox(10.6, 0.3, 3.2, 0, 3.75, 35.4, MAT.roof);            // z 33.8..37
+  // やねのふち（らっかよけの低いパラペット）
+  staticBox(10.9, 0.32, 0.25, 0, 4.06, 4.05, MAT.plaster);
+  staticBox(10.9, 0.32, 0.25, 0, 4.06, 36.95, MAT.plaster);
+  staticBox(0.25, 0.32, 33, -5.28, 4.06, 20.5, MAT.plaster);
+  staticBox(0.25, 0.32, 33, 5.28, 4.06, 20.5, MAT.plaster);
+  // えんとつ
+  staticBox(0.9, 1.1, 0.9, -3.4, 4.4, 8.5, MAT.brick);
+
+  goalFlag(0, 3.9, 36);                                          // ゴール: やねの上の旗
+  isletDeco(11, 7, 40);
+
+  CHECKPOINTS = [
+    { x: 0, y: 0.9, z: 0.5 },       // スタート（にわ）
+    { x: 0, y: 0.9, z: 16.5 },      // 部屋B
+    { x: 0, y: 0.9, z: 27.5 },      // 部屋C
+    { x: 3, y: 2.9, z: 34.5 },      // ロフト
+  ];
+  CP_ZONES = [
+    { cp: 1, x0: -5, x1: 5, z0: 15.2, z1: 18, yMin: -0.5 },
+    { cp: 2, x0: -5, x1: 5, z0: 26.2, z1: 29, yMin: -0.5 },
+    { cp: 3, x0: 0.5, x1: 5.3, z0: 31, z1: 36, yMin: 1.6 },
+  ];
+  GOAL = { x0: -5, x1: 5, z0: 34.3, y: 3.4 };
+}
+
+/* =====================================================================
+   コース2「こうじげんば」— 工事現場・解体（8分規模）
+   レバーのリフト → 鉄球スイング → こわせるかべ → ウィンチ/はり渡り
+   ===================================================================== */
+function buildCourse2() {
+  // ── スタートのヤード（コンクリの浮き島） ──
+  islandBox(13, 14, 0, 0, 1, MAT.concrete);        // z -6..8
+  trafficCone(1.6, 6.4); trafficCone(-2.2, 7.0); trafficCone(4.2, -2.5); trafficCone(-4.5, 2);
+  staticBox(1.8, 0.9, 1.2, -4.6, 0.45, -2.5, MAT.brick);   // レンガのパレット（かざり）
+  staticBox(2.6, 0.18, 0.8, 4.2, 0.09, 3.2, MAT.hazard);   // 黄色いしま板
+
+  // ── ① 貨物リフト: レバーの角度で上下（z8..12のすきまをわたる） ──
+  const liftLever = gimLever(2.4, 0.85, 7.2, -0.45);
+  const liftMesh = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.25, 2.6), MAT.hazard);
+  const liftIdx = kinObject(liftMesh, 'box', [2.6, 0.25, 2.6], [0, -0.125, 10]);
+  GIM.lifts.push({ leverIdx: liftLever, liftIdx, y0: -0.125, y1: 2.875, target: -0.125, speed: 1.2 });
+  // リフトのやぐら（かざり）
+  staticBox(0.3, 12, 0.3, -1.65, 2, 10, MAT.orange);
+  staticBox(0.3, 12, 0.3, 1.65, 2, 10, MAT.orange);
+  staticBox(3.6, 0.3, 0.3, 0, 8.1, 10, MAT.orange);
+  // 力技ルート: 足場ブロックとび（0.9きざみ）
+  staticBox(1.4, 0.25, 1.4, -4.6, 0.78, 9.0, MAT.iron);
+  staticBox(1.4, 0.25, 1.4, -4.6, 1.68, 10.6, MAT.iron);
+  staticBox(1.4, 0.25, 1.4, -4.6, 2.58, 12.2, MAT.iron);
+
+  // ── デッキ1（y3.0, z12..26）: 鉄骨のうえのコンクリ床 ──
+  staticBox(7, 0.4, 14, 0, 2.8, 19, MAT.concrete);
+  for (const [cx, cz] of [[-3, 13], [3, 13], [-3, 25], [3, 25]]) {
+    staticBox(0.45, 7, 0.45, cx, -0.9, cz, MAT.ironDark);        // 柱（虚空へのびる）
+  }
+  staticBox(7.3, 0.28, 0.28, 0, 3.15, 12.2, MAT.hazard);          // ふちの黄しま
+  trafficCone(2.6, 15, 3.0); trafficCone(-2.7, 22, 3.0);
+  staticBox(0.5, 2.2, 3.2, -3.1, 4.1, 17, MAT.orange);            // 鉄骨のたば（かざり）
+
+  // ── ② 鉄球（レッキングボール）: くさりにとびついてスイング（z26..30.5のすきま） ──
+  staticBox(0.55, 12, 0.55, 3.9, 2.5, 28.25, MAT.hazard);         // クレーンのマスト
+  staticBox(8.4, 0.4, 0.55, 0, 8.6, 28.25, MAT.hazard);           // クレーンのうで
+  chain({ anchor: [0, 8.4, 28.25] }, 7, 0.6, { ball: { r: 0.6, mass: 14, mat: MAT.iron } });
+  staticBox(0.42, 0.25, 5.6, 2.9, 2.875, 28.25, MAT.orange);      // 正攻法: 細い鉄骨のはり渡り
+
+  // ── デッキ2（y3.0, z30.5..41.2） ──
+  staticBox(7, 0.4, 10.7, 0, 2.8, 35.85, MAT.concrete);
+  for (const [cx, cz] of [[-3, 31.5], [3, 31.5], [-3, 40.5], [3, 40.5]]) {
+    staticBox(0.45, 7, 0.45, cx, -0.9, cz, MAT.ironDark);
+  }
+
+  // ── ③ こわせるかべ（z36.2）: 鉄球や木箱をぶつけてくずす ──
+  GIM.breakables.push({ hit: false, announced: false });
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 4; col++) {
+      const off = row % 2 ? 0.42 : 0;
+      dynBox(1.62, 0.6, 0.4, -2.55 + col * 1.7 + off, 3.31 + row * 0.62, 36.2, MAT.brick, 7, { breakGroup: 0 });
     }
   }
-  theme.floor(cz, 8, 7);                          // ゴール台
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.6, 10), MAT.stone);
-  pole.position.set(0, 1.3, cz + 4.5); pole.castShadow = true;
-  const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.8), MAT.flag);
-  flag.position.set(0.7, 2.1, cz + 4.5);
-  levelRoot.add(pole, flag);
-  CHECKPOINTS = cps;
-  CP_ZONES = zones;
-  GOAL = { x0: -3.5, x1: 3.5, z0: cz + 1.5, y: -1 };
-  if (theme.scenery) theme.scenery(cz, rng);
+  dynBox(0.7, 0.7, 0.7, 2.5, 3.6, 33.5, MAT.crate, 12, { noSleep: true });           // 投げる/ぶつける用の木箱
+  dynBox(0.7, 0.7, 0.7, -2.5, 3.6, 34.2, MAT.crate, 12, { noSleep: true });
+
+  // ── ④ ウィンチ: ハンドル（ヒンジ）の角度でゴンドラがゆっくり上下（乗って移動できる） ──
+  const winchLever = gimLever(1.8, 3.85, 40.4, -0.45, { baseY: 3.0 });
+  const gondola = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.25, 2.3), MAT.hazard);
+  const gondolaIdx = kinObject(gondola, 'box', [2.3, 0.25, 2.3], [0, 2.875, 42.4]);
+  GIM.lifts.push({ leverIdx: winchLever, liftIdx: gondolaIdx, y0: 2.875, y1: 6.175, target: 2.875, speed: 0.5 });
+  addRod([0, 8.6, 42.4], gondolaIdx, 0.04, MAT.ironDark);          // つりワイヤー（見た目）
+  staticBox(0.35, 6, 0.35, -1.5, 5.6, 42.4, MAT.ironDark);
+  staticBox(0.35, 6, 0.35, 1.5, 5.6, 42.4, MAT.ironDark);
+  staticBox(3.4, 0.3, 0.35, 0, 8.75, 42.4, MAT.ironDark);
+
+  // ── ⑤ 鉄骨のはり: とびうつってのぼる（ひとりでも上がれる正攻法） ──
+  staticBox(1.3, 0.28, 1.0, -4.6, 3.9, 41.4, MAT.orange);
+  staticBox(1.3, 0.28, 1.0, -4.6, 4.8, 42.6, MAT.orange);
+  staticBox(1.3, 0.28, 1.0, -4.6, 5.7, 43.8, MAT.orange);
+
+  // ── ゴールの屋上（y6.3, z43.7..50.5） ──
+  staticBox(7, 0.4, 6.8, 0, 6.1, 47.1, MAT.concrete);
+  for (const [cx, cz] of [[-3, 44.5], [3, 44.5], [-3, 50], [3, 50]]) {
+    staticBox(0.45, 13.4, 0.45, cx, -0.4, cz, MAT.ironDark);
+  }
+  staticBox(7.3, 0.28, 0.28, 0, 6.45, 43.85, MAT.hazard);
+  trafficCone(2.4, 48.5, 6.3); trafficCone(-2.5, 45.5, 6.3);
+  // みかんせいの鉄骨フレーム（かざり）
+  staticBox(0.4, 4, 0.4, -3, 8.3, 50, MAT.orange);
+  staticBox(0.4, 4, 0.4, 3, 8.3, 50, MAT.orange);
+  staticBox(6.4, 0.35, 0.4, 0, 10.3, 50, MAT.orange);
+
+  goalFlag(0, 6.3, 49.3);
+  isletDeco(22, 7, 50);
+
+  CHECKPOINTS = [
+    { x: 0, y: 0.9, z: 0.5 },       // ヤード
+    { x: 0, y: 3.9, z: 14 },        // デッキ1
+    { x: 0, y: 3.9, z: 32 },        // デッキ2
+    { x: 0, y: 7.2, z: 45 },        // 屋上
+  ];
+  CP_ZONES = [
+    { cp: 1, x0: -3.5, x1: 3.5, z0: 12, z1: 16, yMin: 2.5 },
+    { cp: 2, x0: -3.5, x1: 3.5, z0: 30.5, z1: 34, yMin: 2.5 },
+    { cp: 3, x0: -3.5, x1: 3.5, z0: 43.7, z1: 46, yMin: 5.8 },
+  ];
+  GOAL = { x0: -3.5, x1: 3.5, z0: 48, y: 5.7 };
 }
 
-// 床の作りかた（テーマべつ）
-function grassFloor(z0, len, w) { island(w, len, 0, 0, z0 + len / 2); }
-function stoneFloor(z0, len, w) {
-  staticBox(w, 0.4, len, 0, -0.2, z0 + len / 2, MAT.stone);
-  staticBox(w, 1.0, len, 0, -0.9, z0 + len / 2, MAT.dirt);
-}
-function metalFloor(z0, len, w) {
-  staticBox(w, 0.5, len, 0, -0.25, z0 + len / 2, MAT.metal);
-  staticBox(0.3, 0.35, len, -(w / 2 - 0.15), 0.17, z0 + len / 2, MAT.hazard);
-  staticBox(0.3, 0.35, len, (w / 2 - 0.15), 0.17, z0 + len / 2, MAT.hazard);
-}
-
-function buildCourse1() {
-  genCourse({
-    seed: 12345, segments: 60, cpEvery: 12, floor: grassFloor,
-    pool: ['gap', 'sweeper', 'pendulum', 'stones', 'ferry', 'trampoline', 'climb', 'walk', 'gap', 'sweeper'],
-    decorate: () => { tree(-4.6, 6.5); tree(4.8, 1.2, 0, 0.8); },
-    scenery: (endZ, rng) => {
-      for (let i = 0; i < Math.round(endZ / 40); i++) {
-        const ix = (rng() < 0.5 ? -1 : 1) * (10 + rng() * 12), iz = rng() * endZ;
-        const g = new THREE.Mesh(new THREE.BoxGeometry(7, 1.4, 6), MAT.dirt); g.position.set(ix, -0.9, iz);
-        const gg = new THREE.Mesh(new THREE.BoxGeometry(7, 0.3, 6), MAT.grass); gg.position.set(ix, -0.05, iz);
-        levelRoot.add(g, gg); tree(ix + 2, iz - 1, 0.1, 0.9 + rng() * 0.5);
-      }
-    },
-  });
-}
-function buildCourse2() {
-  genCourse({
-    seed: 24680, segments: 58, cpEvery: 12, floor: stoneFloor,
-    pool: ['gap', 'sweeper', 'pendulum', 'crusher', 'climb', 'stones', 'belt', 'walk', 'crusher', 'pendulum'],
-    scenery: (endZ, rng) => {
-      for (let i = 0; i < Math.round(endZ / 40); i++) {
-        const ix = (rng() < 0.5 ? -1 : 1) * (11 + rng() * 10), iz = rng() * endZ;
-        const tw = new THREE.Mesh(new THREE.BoxGeometry(4, 9 + rng() * 5, 4), MAT.stone); tw.position.set(ix, 3, iz);
-        const roof = new THREE.Mesh(new THREE.ConeGeometry(3, 3, 4), MAT.gate); roof.position.set(ix, 9, iz);
-        levelRoot.add(tw, roof);
-      }
-    },
-  });
-}
+/* =====================================================================
+   コース3「ゆめのおしろ」— 中世の城（10分規模）
+   くさりで堀こえ → カタパルト → はねばし → 中庭 → 階段/かべのぼりで塔の旗へ
+   ===================================================================== */
 function buildCourse3() {
-  genCourse({
-    seed: 36912, segments: 60, cpEvery: 12, floor: metalFloor,
-    pool: ['pistons', 'crusher', 'belt', 'turntables', 'ferry', 'gap', 'stones', 'pistons', 'crusher', 'walk'],
-    scenery: (endZ, rng) => {
-      for (let i = 0; i < Math.round(endZ / 40); i++) {
-        const ix = (rng() < 0.5 ? -1 : 1) * (12 + rng() * 10), iz = rng() * endZ, s = 1 + rng() * 0.5;
-        const b = new THREE.Mesh(new THREE.BoxGeometry(5 * s, 8 * s, 5 * s), MAT.metalDark); b.position.set(ix, 2, iz);
-        const ch = new THREE.Mesh(new THREE.CylinderGeometry(0.6 * s, 0.7 * s, 5 * s, 10), MAT.metalDark); ch.position.set(ix + 2 * s, 6 * s, iz);
-        levelRoot.add(b, ch);
-      }
-    },
-  });
-}
+  // ── スタートの草原島 ──
+  islandBox(13, 14, 0, 0, 1, MAT.grass);           // z -6..8
+  banner(-3, 0, -2.5, MAT.red); banner(3, 0, -2.5, MAT.blue);
+  tree(-5, -3, 0, 1.0); tree(5.2, -1.5, 0, 0.85);
+  staticBox(1.6, 0.3, 1.2, 0, 0.15, 7.3, MAT.stone);              // ふみ切り台
 
+  // ── ① くさりぶら下がりで堀1（z8..13）をわたる ──
+  staticBox(0.6, 10, 0.6, -3.0, 1.0, 10.5, MAT.stoneDark);        // 石の柱（虚空から）
+  staticBox(0.6, 10, 0.6, 3.0, 1.0, 10.5, MAT.stoneDark);
+  staticBox(6.8, 0.45, 0.6, 0, 6.2, 10.5, MAT.woodDark);          // はり
+  chain({ anchor: [0, 6.0, 10.5] }, 8, 0.55, { grip: true });
+  // 力技ルート: とび石
+  islandBox(1.3, 1.3, -4.7, 0, 9.4); islandBox(1.3, 1.3, -4.7, 0, 11); islandBox(1.3, 1.3, -4.7, 0, 12.6);
+
+  // ── 前庭（z13..27） ──
+  islandBox(16, 14, 0, 0, 20, MAT.grass);
+  tree(6.6, 14.5, 0, 1.0); banner(6.8, 0, 19, MAT.red);
+
+  // ── ② カタパルト: おもりをのせると発射！じぶんをはねばしへ飛ばす ──
+  staticBox(0.4, 1.3, 0.4, -3.3, 0.65, 21, MAT.woodDark);         // 台
+  staticBox(0.4, 1.3, 0.4, -1.7, 0.65, 21, MAT.woodDark);
+  const armIdx = hingedBox(1.05, 0.14, 3.8, MAT.woodDark, 6, [-2.5, 1.2, 21], [0, 0, 0], [1, 0, 0], -0.48,
+    { angularDamping: 0.4, motorForce: 90 });
+  {  // かごのふち（うでの見た目の子メッシュ）
+    const armMesh = dynObjects[armIdx].mesh;
+    for (const [lx, lz, w, d] of [[0, -1.82, 1.1, 0.12], [-0.52, -1.5, 0.12, 0.7], [0.52, -1.5, 0.12, 0.7]]) {
+      const rim = new THREE.Mesh(new THREE.BoxGeometry(w, 0.3, d), MAT.woodDark);
+      rim.position.set(lx, 0.2, lz);
+      armMesh.add(rim);
+    }
+  }
+  // 岩のおもり（ころがして うでの先へおとす）
+  const rock = (x, y, z) => {
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 1), MAT.stoneDark);
+    m.position.set(x, y, z);
+    m.castShadow = m.receiveShadow = true;
+    levelRoot.add(m);
+    dynObjects.push({ mesh: m, kind: 'sphere', radius: 0.42, mass: 30, noSleep: true, home: { p: [x, y, z] }, body: null });
+    return dynObjects.length - 1;
+  };
+  const w1 = rock(-2.9, 2.9, 23.7);
+  const w2 = rock(-2.1, 2.9, 23.7);
+  GIM.catapults.push({
+    idx: armIdx, rest: -0.48, weights: [w1, w2],
+    pad: [-2.5, 2.1, 22.85], basket: [-2.5, 0.35, 19.2], vel: [1.5, 11.2, 6.4],
+    readyAt: 0, fireAt: 0, launched: false,
+  });
+  // おもりのたな（うしろから階段でのぼって、まえ＝うでの先へころがしおとす）
+  staticBox(2.4, 0.3, 1.8, -2.5, 2.3, 23.8, MAT.woodDark);
+  staticBox(2.4, 0.24, 0.1, -2.5, 2.57, 24.65, MAT.woodDark);    // うしろのふち
+  staticBox(0.1, 0.24, 1.8, -3.65, 2.57, 23.8, MAT.woodDark);    // よこのふち
+  staticBox(0.1, 0.24, 1.8, -1.35, 2.57, 23.8, MAT.woodDark);
+  staticBox(0.35, 2.2, 0.35, -3.5, 1.1, 24.5, MAT.woodDark);
+  staticBox(0.35, 2.2, 0.35, -1.5, 1.1, 24.5, MAT.woodDark);
+  stairs(4, 0.55, 0.5, 2.2, MAT.woodDark, -2.5, 0, 26.6, 'z', -1);
+
+  // ── ③ はねばし（z27..31.4の堀2）: くさりをつかんで体重でひきおろす ──
+  islandBox(1.4, 1.4, 0.9, 0, 29.3);                              // 堀の中のとび石（くさりのま下ちかく）
+  const bridgeIdx = hingedBox(3.2, 0.2, 4.4, MAT.woodDark, 5, [0, 0.12, 31.4], [0, 0, 2.2], [1, 0, 0], 1.22,
+    { angularDamping: 0.5, motorForce: 60 });
+  const bridgeChain = chain({ idx: bridgeIdx, local: [0, 0, -2.15] }, 5, 0.45, { grip: true });
+  GIM.drawbridges.push({ idx: bridgeIdx, upAngle: 1.22, grabIdxs: [...bridgeChain, bridgeIdx], open: false });
+
+  // ── おしろの島（z31.4..58.4） ──
+  islandBox(20, 27, 0, 0, 44.9, MAT.grass);
+  // 城門のかべ（z31.4・とびら穴つき）と 見張り塔
+  wallZ(31.4, -9.6, 9.6, 0, 6, MAT.stone, [{ x0: -1.7, x1: 1.7, y0: 0, y1: 3.9 }], 0.9);
+  crenels(-5.6, 6.27, 31.4, 7.2, 'x'); crenels(5.6, 6.27, 31.4, 7.2, 'x');
+  for (const tx of [-2.9, 2.9]) {
+    staticBox(2.2, 8, 2.2, tx, 4, 31.4, MAT.stone);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.7, 2.0, 6), MAT.roof);
+    cone.position.set(tx, 9, 31.4);
+    cone.castShadow = true;
+    levelRoot.add(cone);
+    banner(tx, 8, 30.2, MAT.red);
+  }
+  // 中庭のまわりのかべ
+  wallX(-9.6, 31.4, 52, 0, 5, MAT.stone, [], 0.8);
+  wallX(9.6, 31.4, 52, 0, 5, MAT.stone, [], 0.8);
+  wallZ(58, -9.6, 9.6, 0, 5, MAT.stone, [], 0.8);
+  // 中庭のかざり: いど・木箱・木
+  staticBox(1.6, 0.85, 1.6, 5, 0.42, 44, MAT.stone);
+  const wellRoof = new THREE.Mesh(new THREE.ConeGeometry(1.3, 1.0, 4), MAT.roof);
+  wellRoof.position.set(5, 2.1, 44); wellRoof.rotation.y = Math.PI / 4; wellRoof.castShadow = true;
+  levelRoot.add(wellRoof);
+  tree(-5, 34.5, 0, 1.0); tree(7.5, 34.5, 0, 0.9);
+  dynBox(0.72, 0.72, 0.72, 4, 0.55, 40, MAT.crate, 12, { noSleep: true });
+  dynBox(0.72, 0.72, 0.72, 4.9, 0.55, 41, MAT.crate, 12, { noSleep: true });
+
+  // ── ④ 塔への道: 正攻法（階段→城壁の通路→わたり廊下）＋力技（正面のかべのぼり） ──
+  stairs(10, 0.42, 0.55, 2.2, MAT.stone, -7.6, 0, 40, 'z', 1);    // 中庭 → 城壁上（y4.2）
+  staticBox(3.4, 0.35, 6.5, -7.4, 4.03, 48.75, MAT.stone);        // 城壁の通路（上面4.2）
+  crenels(-9.0, 4.47, 48.75, 6.5, 'z');
+  staticBox(2.6, 0.3, 1.4, -5.1, 4.05, 52.4, MAT.stone);          // わたり石だたみ
+  staticBox(1.5, 0.3, 3.2, -3.8, 4.05, 53.6, MAT.stone);          // 塔のバルコニー
+  // 塔（そびえる本体）と、外がわの浮き階段
+  staticBox(6, 7.2, 6, 0, 3.6, 55, MAT.stone);
+  stairs(4, 0.7, 0.75, 1.3, MAT.stone, -3.45, 4.2, 55.2, 'z', 1); // バルコニー → 塔のかど（y7.0）
+  staticBox(1.3, 0.24, 1.0, -2.2, 7.08, 58.4, MAT.stone);         // かどの足場 → 屋上へ
+  // 力技: 正面（z52がわ）のよじのぼりレッジ
+  for (let i = 0; i < 7; i++) {
+    staticBox(1.5, 0.14, 0.34, i % 2 ? 1.15 : -1.15, 0.9 * (i + 1), 51.83, MAT.stoneDark);
+  }
+  crenels(0, 7.47, 52.15, 5.6, 'x');                              // 塔の屋上のふち
+  crenels(0, 7.47, 57.85, 5.6, 'x');
+  crenels(-2.85, 7.47, 55, 5.6, 'z');
+  crenels(2.85, 7.47, 55, 5.6, 'z');
+
+  goalFlag(0, 7.2, 55);                                           // ゴール: 塔のてっぺんの旗
+  isletDeco(33, 8, 58);
+
+  CHECKPOINTS = [
+    { x: 0, y: 0.9, z: 0.5 },        // スタート
+    { x: 0, y: 0.9, z: 15 },         // 前庭
+    { x: 0, y: 0.9, z: 33.5 },       // 城門のなか
+    { x: 0, y: 0.9, z: 37.5 },       // 中庭
+    { x: -7.4, y: 5.1, z: 47 },      // 城壁の通路
+  ];
+  CP_ZONES = [
+    { cp: 1, x0: -8, x1: 8, z0: 13, z1: 17, yMin: -0.5 },
+    { cp: 2, x0: -2, x1: 2, z0: 31.5, z1: 35, yMin: -0.5 },
+    { cp: 3, x0: -6, x1: 6, z0: 35.5, z1: 39.5, yMin: -0.5 },
+    { cp: 4, x0: -9.1, x1: -5.7, z0: 45.5, z1: 52, yMin: 3.7 },
+  ];
+  GOAL = { x0: -3.2, x1: 3.2, z0: 52.2, y: 6.6 };
+}
 
 /* =====================================================================
    コース定義と切りかえ
    ===================================================================== */
-// 各コースの build() が CHECKPOINTS / CP_ZONES / GOAL を設定する（長い自動生成コース）
+// 各コースの build() が CHECKPOINTS / CP_ZONES / GOAL を設定する
 const COURSES = [
-  { name: '🌿 草原アイランド', build: buildCourse1, cam: { x: 0, z: 30, r: 34 } },
-  { name: '🏰 からくり城', build: buildCourse2, cam: { x: 0, z: 26, r: 30 } },
-  { name: '🏭 ドキドキ工場', build: buildCourse3, cam: { x: 0, z: 32, r: 38 } },
+  {
+    name: '🏠 ゆめのおうち', desc: 'はじめてのゆめ。ドア・ボタン・はこ運びをおぼえよう',
+    build: buildCourse1, cam: { x: 0, z: 18, r: 24 },
+  },
+  {
+    name: '🏗️ こうじげんば', desc: 'リフトと鉄球で こうじ中のビルのてっぺんへ',
+    build: buildCourse2, cam: { x: 0, z: 26, r: 32 },
+  },
+  {
+    name: '🏰 ゆめのおしろ', desc: 'カタパルトと はねばしをこえて 塔の旗をめざせ',
+    build: buildCourse3, cam: { x: 0, z: 30, r: 38 },
+  },
 ];
 let courseIdx = -1;
 
@@ -695,41 +933,59 @@ function buildLevel(idx) {
   staticDefs.length = 0;
   dynObjects.length = 0;
   for (const k of Object.keys(GIM)) delete GIM[k];
-  // うごくギミックの入れ物（build() がここに部品を push する）
-  GIM.pendulums = [];
+  // ギミックの入れ物（build() がここに部品を push する）
   GIM.rods = [];
-  GIM.platforms = [];
-  GIM.sweepers = [];
-  GIM.pistons = [];
-  GIM.crushers = [];
-  GIM.turntables = [];
-  GIM.elevators = [];
-  GIM.updrafts = [];
-  GIM.climbs = [];
+  GIM.chains = [];
+  GIM.buttons = [];
+  GIM.pads = [];
+  GIM.lifts = [];
+  GIM.drawbridges = [];
+  GIM.catapults = [];
+  GIM.breakables = [];
   courseIdx = idx;
   // build() が CHECKPOINTS / CP_ZONES / GOAL を直接セットする
   COURSES[idx].build();
 }
 
-/* 空・雲・水などコースによらない背景（1回だけつくる） */
-let waterSurf = null;
+/* 空・雲などコースによらない背景（1回だけつくる）
+   「夢の中の浮遊世界」: 空のグラデーションドーム＋ローポリ雲（レベルの下にも）。海はなし */
+let waterSurf = null;   // 旧・海面（廃止。メインループの参照のため変数だけ残す）
 function buildEnvironment() {
-  for (let i = 0; i < 12; i++) {
-    const c = new THREE.Mesh(new THREE.SphereGeometry(1.6 + Math.random() * 1.6, 10, 7), MAT.cloud);
-    c.scale.y = 0.4;
-    c.position.set(Math.random() * 90 - 40, 11 + Math.random() * 8, Math.random() * 85 - 8);
-    scene.add(c);
-  }
-  waterSurf = new THREE.Mesh(
-    new THREE.PlaneGeometry(500, 500),
-    new THREE.MeshLambertMaterial({ color: 0x4aa3d8, transparent: true, opacity: 0.78, side: THREE.DoubleSide }),
+  // 空のグラデーション（上 #87B8E8 → 地平線 #E8F0F8）
+  const cv = document.createElement('canvas');
+  cv.width = 2; cv.height = 256;
+  const c = cv.getContext('2d');
+  const gr = c.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, '#87b8e8');
+  gr.addColorStop(0.52, '#b9d5ee');
+  gr.addColorStop(1, '#e8f0f8');
+  c.fillStyle = gr;
+  c.fillRect(0, 0, 2, 256);
+  const tex = new THREE.CanvasTexture(cv);
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(175, 24, 14),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false }),
   );
-  waterSurf.rotation.x = -Math.PI / 2;
-  waterSurf.position.y = WATER_Y;
-  const deep = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), new THREE.MeshBasicMaterial({ color: 0x2c6f9e }));
-  deep.rotation.x = -Math.PI / 2;
-  deep.position.y = WATER_Y - 6;
-  scene.add(waterSurf, deep);
+  dome.position.set(0, -8, 26);
+  scene.add(dome);
+
+  // ローポリ雲（かたまり感のあるモコモコ。上にも、レベルのずっと下にも）
+  const rng = makeRng(4649);
+  const mkCloud = (x, y, z, s) => {
+    const g = new THREE.Group();
+    const n = 3 + Math.floor(rng() * 3);
+    for (let i = 0; i < n; i++) {
+      const b = new THREE.Mesh(new THREE.IcosahedronGeometry(1 + rng() * 0.9, 0), MAT.cloud);
+      b.position.set((i - (n - 1) / 2) * 1.5 + (rng() - 0.5), (rng() - 0.5) * 0.55, (rng() - 0.5) * 1.3);
+      b.scale.y = 0.55;
+      g.add(b);
+    }
+    g.scale.setScalar(s);
+    g.position.set(x, y, z);
+    scene.add(g);
+  };
+  for (let i = 0; i < 15; i++) mkCloud(-75 + rng() * 150, 10 + rng() * 18, -35 + rng() * 125, 1 + rng() * 1.7);
+  for (let i = 0; i < 11; i++) mkCloud(-65 + rng() * 130, -9 - rng() * 15, -25 + rng() * 110, 1.5 + rng() * 2.1);
 }
 buildEnvironment();
 
@@ -745,7 +1001,11 @@ function buildCoursePicker() {
   COURSES.forEach((course, i) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.textContent = course.name;
+    const title = document.createElement('b');
+    title.textContent = course.name;
+    const desc = document.createElement('small');
+    desc.textContent = course.desc;
+    b.append(title, desc);
     if (i === courseSel) b.classList.add('sel');
     b.addEventListener('click', () => {
       courseSel = i;
@@ -764,6 +1024,12 @@ buildLevel(courseSel);
    ===================================================================== */
 const UP = new THREE.Vector3(0, 1, 0);
 const _tv1 = new THREE.Vector3(), _tv2 = new THREE.Vector3(), _tv3 = new THREE.Vector3();
+
+// 名札のふちどり色（オフホワイトなど明るすぎる色は青グレーに）
+function labelColor(c) {
+  const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+  return (r + g + b) / 3 > 215 ? 0x8a97a8 : c;
+}
 
 function makeNameSprite(name, colorHex) {
   const cv = document.createElement('canvas');
@@ -832,91 +1098,139 @@ function addHatTo(group, h, bodyColor) {
 class Rig {
   constructor(skin, name) {
     skin = normSkin(skin);
-    const color = SKIN_COLORS[skin.c];
-    this.color = color;
-    const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.65 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xffe8d1, roughness: 0.7 });
-    const darkMat = new THREE.MeshStandardMaterial({ color: 0x333344, roughness: 0.5 });
+    const accent = SKIN_COLORS[skin.c];
+    this.color = accent;
+    // 基本はオフホワイトのミニマル人型。スキン色は「上半身の差し色」
+    const bodyMat = new THREE.MeshStandardMaterial({ color: OFF_WHITE, roughness: 0.8 });
+    const accentMat = skin.c === 0 ? bodyMat : new THREE.MeshStandardMaterial({ color: accent, roughness: 0.75 });
 
     this.group = new THREE.Group();
 
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.7, 6, 14), bodyMat);
-    torso.castShadow = true;
-    this.group.add(torso);
+    // 腰まわり（下半身・オフホワイト）
+    const hips = new THREE.Mesh(new THREE.SphereGeometry(0.27, 14, 10), bodyMat);
+    hips.scale.set(1, 0.82, 0.9);
+    hips.position.y = -0.3;
+    // 樽型の胴（上半身＝差し色）
+    const chest = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.3, 6, 14), accentMat);
+    chest.scale.set(1, 1, 0.88);
+    chest.position.y = 0.06;
+    hips.castShadow = chest.castShadow = true;
+    this.group.add(hips, chest);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 16, 12), skinMat);
-    head.position.set(0, 0.78, 0);
-    head.castShadow = true;
-    this.group.add(head);
-    for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), darkMat);
-      eye.position.set(0.075 * sx, 0.82, 0.185);
-      this.group.add(eye);
+    // 首＋頭（まるく大きめ・顔ディテールなし）。headGrpごと揺らして「遅れ」を出す
+    this.headGrp = new THREE.Group();
+    this.headGrp.position.y = 0.5;
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.115, 0.16, 10), bodyMat);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 18, 14), bodyMat);
+    head.position.y = 0.27; // ワールド~0.77（ぼうし位置は旧頭と同じ）
+    neck.castShadow = head.castShadow = true;
+    this.headGrp.add(neck, head);
+    if (skin.h) {
+      const hatHolder = new THREE.Group();
+      hatHolder.position.y = -0.5; // addHatTo は胴中心原点の座標系なので相殺
+      addHatTo(hatHolder, skin.h, accent);
+      this.headGrp.add(hatHolder);
     }
-    if (skin.h) addHatTo(this.group, skin.h, color);
+    this.group.add(this.headGrp);
 
-    // あし（ひざなし・ふりこアニメ）
+    // あし（太い円筒＋ミトン状の足・ひざなし。バネ追従でオーバーシュート）
     this.legs = [];
+    this.legState = [{ a: 0, v: 0 }, { a: 0, v: 0 }];
     for (const sx of [-1, 1]) {
       const hip = new THREE.Group();
-      hip.position.set(0.12 * sx, -0.35, 0);
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.075, 0.3, 10), bodyMat);
-      leg.position.y = -0.14;
-      leg.castShadow = true;
-      hip.add(leg);
+      hip.position.set(0.14 * sx, -0.3, 0);
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.09, 0.24, 10), bodyMat);
+      leg.position.y = -0.12;
+      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), bodyMat);
+      foot.scale.set(1, 0.8, 1.25);
+      foot.position.y = -0.25;
+      leg.castShadow = foot.castShadow = true;
+      hip.add(leg, foot);
       this.group.add(hip);
       this.legs.push(hip);
     }
 
-    // うで（かた→手のシリンダーを毎フレーム張りなおす）と手
+    // うで（太い円筒・かた→手を毎フレーム張りなおす）とミトン状の手（球）
     this.arms = [];
     this.hands = [];
     this.handMats = [];
     for (let i = 0; i < 2; i++) {
-      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 1, 8), bodyMat);
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.088, 0.088, 1, 10), bodyMat);
       arm.castShadow = true;
       scene.add(arm);
       this.arms.push(arm);
-      const hm = new THREE.MeshStandardMaterial({ color: 0xffe8d1, roughness: 0.7 });
-      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), hm);
+      const hm = new THREE.MeshStandardMaterial({ color: OFF_WHITE, roughness: 0.8 });
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 10), hm);
       hand.castShadow = true;
       scene.add(hand);
       this.hands.push(hand);
       this.handMats.push(hm);
     }
 
-    this.nameSpr = makeNameSprite(name, color);
+    this.nameSpr = makeNameSprite(name, labelColor(accent));
     scene.add(this.nameSpr);
     scene.add(this.group);
 
     this.lastPos = new THREE.Vector3();
     this.phase = 0;
     this.speedSm = 0;
+    this.vySm = 0;
+    this.yawVelSm = 0;
+    this.lastYaw = 0;
+    this.limpSm = 0;
   }
 
-  // p:Vector3ふう, q:Quaternionふう, hl/hr: [x,y,z], grabMask: bit0=左手 bit1=右手
-  setPose(p, q, hl, hr, grabMask, dt) {
+  // p:Vector3ふう, q:Quaternionふう, hl/hr: [x,y,z],
+  // flags: bit0=左手つかみ bit1=右手つかみ bit2=脱力（ラグドール）
+  setPose(p, q, hl, hr, flags, dt) {
+    const grabMask = flags & 3;
+    const limp = !!(flags & 4);
     const g = this.group;
     g.position.set(p.x, p.y, p.z);
     g.quaternion.set(q.x, q.y, q.z, q.w);
     g.updateMatrixWorld();
 
-    // あし（移動スピードでふりこ）
+    // 移動・旋回・落下スピードを平滑化（慣性のある手続きアニメ用）
     if (dt > 0) {
       const sp = _tv1.set(p.x - this.lastPos.x, 0, p.z - this.lastPos.z).length() / dt;
-      this.speedSm += (Math.min(sp, 5) - this.speedSm) * 0.2;
-      this.phase += this.speedSm * dt * 3.2;
+      this.speedSm += (Math.min(sp, 5) - this.speedSm) * Math.min(1, dt * 10);
+      this.phase += this.speedSm * dt * 3.4;
+      const vy = (p.y - this.lastPos.y) / dt;
+      this.vySm += (Math.min(6, Math.max(-6, vy)) - this.vySm) * Math.min(1, dt * 6);
+      const yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.z * q.z));
+      let dy = yaw - this.lastYaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      this.yawVelSm += (Math.min(6, Math.max(-6, dy / dt)) - this.yawVelSm) * Math.min(1, dt * 8);
+      this.lastYaw = yaw;
+      this.limpSm += ((limp ? 1 : 0) - this.limpSm) * Math.min(1, dt * 7);
     }
     this.lastPos.set(p.x, p.y, p.z);
-    const amp = Math.min(this.speedSm / 3, 1) * 0.65;
-    this.legs[0].rotation.x = Math.sin(this.phase) * amp;
-    this.legs[1].rotation.x = Math.sin(this.phase + Math.PI) * amp;
+
+    // あし: バネで目標角へ追従（遅れ＋オーバーシュート＝ふにゃふにゃ千鳥足）
+    const walkAmp = Math.min(this.speedSm / WALK_SPEED, 1);
+    const amp = walkAmp * 0.72 * (1 - this.limpSm);
+    for (let i = 0; i < 2; i++) {
+      const st = this.legState[i];
+      const target = Math.sin(this.phase + (i ? Math.PI : 0)) * amp + this.limpSm * (i ? -0.85 : 0.55);
+      if (dt > 0) {
+        st.v += (target - st.a) * 130 * dt - st.v * 9 * dt;
+        st.a += st.v * dt;
+      } else st.a = target;
+      this.legs[i].rotation.x = st.a;
+      this.legs[i].rotation.z = (i ? -1 : 1) * -this.limpSm * 0.45;
+    }
+
+    // あたま: 旋回・落下に遅れてついてくる＋歩行ボブ。脱力中はがくっと前へ
+    this.headGrp.rotation.y = -this.yawVelSm * 0.09;
+    this.headGrp.rotation.x = -this.vySm * 0.05 + Math.sin(this.phase * 2) * 0.05 * walkAmp + this.limpSm * 0.5;
+    this.headGrp.rotation.z = Math.sin(this.phase) * 0.045 * walkAmp;
 
     // うで
     const hands = [hl, hr];
     for (let i = 0; i < 2; i++) {
       const sx = i === 0 ? -1 : 1;
-      const shoulder = _tv1.set(0.3 * sx, 0.32, 0).applyMatrix4(g.matrixWorld);
+      const shoulder = _tv1.set(0.27 * sx, 0.3, 0).applyMatrix4(g.matrixWorld);
       const hp = _tv2.set(hands[i][0], hands[i][1], hands[i][2]);
       const arm = this.arms[i];
       arm.position.copy(shoulder).add(hp).multiplyScalar(0.5);
@@ -925,10 +1239,10 @@ class Rig {
       arm.scale.set(1, len, 1);
       arm.quaternion.setFromUnitVectors(UP, dir.normalize());
       this.hands[i].position.copy(hp);
-      this.handMats[i].color.setHex((grabMask >> i) & 1 ? 0xffd43b : 0xffe8d1);
+      this.handMats[i].color.setHex((grabMask >> i) & 1 ? 0xffd43b : OFF_WHITE);
     }
 
-    this.nameSpr.position.set(p.x, p.y + 1.35, p.z);
+    this.nameSpr.position.set(p.x, p.y + 1.45, p.z);
   }
 
   dispose() {
@@ -940,7 +1254,7 @@ class Rig {
    物理（ホスト側のみ）
    ===================================================================== */
 let world = null;
-let charMaterial, groundMaterial, handMaterial;
+let charMaterial, groundMaterial, handMaterial, objMaterial;
 let simT = 0;
 const GROUP_WORLD = 1, GROUP_OBJ = 2;
 const playerGroup = (idx) => 4 << idx; // idx 0..4 → bit 2..6
@@ -948,15 +1262,23 @@ const playerGroup = (idx) => 4 << idx; // idx 0..4 → bit 2..6
 function initPhysics() {
   world = new CANNON.World({ gravity: new CANNON.Vec3(0, GRAVITY, 0), allowSleep: true });
   world.broadphase = new CANNON.SAPBroadphase(world);
-  world.defaultContactMaterial.friction = 0.4;
+  world.defaultContactMaterial.friction = 0.55; // 高めの摩擦＝物の引きずり感
   world.defaultContactMaterial.restitution = 0;
 
   groundMaterial = new CANNON.Material('ground');
   charMaterial = new CANNON.Material('char');
   handMaterial = new CANNON.Material('hand');
+  objMaterial = new CANNON.Material('obj');
   // キャラの摩擦は0（摩擦の偶力で転んでしまうため、停止・追従は速度ブレンドで行う）
   world.addContactMaterial(new CANNON.ContactMaterial(charMaterial, groundMaterial, { friction: 0, restitution: 0 }));
   world.addContactMaterial(new CANNON.ContactMaterial(handMaterial, groundMaterial, { friction: 0.8, restitution: 0 }));
+  // 木箱などの動的オブジェクト: 床との摩擦は0にして、かわりに stepGimmicks の
+  // 疑似静止摩擦（低速時の減衰）でとめる。cannon-es の箱どうしの接触摩擦は
+  // 設定値よりはるかに強く効いてしまい、キャラの力では「おせない」ため
+  world.addContactMaterial(new CANNON.ContactMaterial(objMaterial, groundMaterial, { friction: 0, restitution: 0 }));
+  world.addContactMaterial(new CANNON.ContactMaterial(objMaterial, objMaterial, { friction: 0.3, restitution: 0 }));
+  world.addContactMaterial(new CANNON.ContactMaterial(charMaterial, objMaterial, { friction: 0, restitution: 0 }));
+  world.addContactMaterial(new CANNON.ContactMaterial(handMaterial, objMaterial, { friction: 0.8, restitution: 0 }));
 
   // 静的コライダー
   for (const s of staticDefs) {
@@ -981,22 +1303,32 @@ function initPhysics() {
     const body = new CANNON.Body({
       mass: isKin ? 0 : o.mass,
       type: isKin ? CANNON.Body.KINEMATIC : CANNON.Body.DYNAMIC,
-      material: groundMaterial,
+      material: isKin ? groundMaterial : objMaterial,
       position: new CANNON.Vec3(...o.home.p),
       collisionFilterGroup: isKin ? GROUP_WORLD : GROUP_OBJ,
-      linearDamping: 0.05,
+      linearDamping: o.linearDamping !== undefined ? o.linearDamping : 0.05,
       angularDamping: o.angularDamping !== undefined ? o.angularDamping : 0.05,
     });
     if (o.home.q) body.quaternion.set(...o.home.q);
     if (o.kind === 'sphere') body.addShape(new CANNON.Sphere(o.radius));
     else body.addShape(new CANNON.Box(new CANNON.Vec3(o.size[0] / 2, o.size[1] / 2, o.size[2] / 2)));
-    // 箱・レンガなどは寝かせて負荷をへらす（さわれば起きる）。ロープ・ヒンジ物は常時アクティブ
-    body.allowSleep = !isKin && !o.rope && !o.hinge;
+    // レンガなどは寝かせて負荷をへらす（つよい衝撃で起きる）。
+    // ロープ・ヒンジ・パズルの箱（noSleep）は常時アクティブ（寝ると「おしても動かない」ため）
+    body.allowSleep = !isKin && !o.rope && !o.hinge && !o.noSleep;
     body.sleepSpeedLimit = 0.3;
     body.sleepTimeLimit = 0.8;
     if (o.spin !== undefined) { body.spin = o.spin; body.spinCenter = o.spinCenter; } // 回転床
     world.addBody(body);
     o.body = body;
+
+    // こわせるかべのレンガ: 閾値をこえる衝撃（鉄球・投げた箱）でくずれたことを記録
+    if (o.breakGroup !== undefined) {
+      body.addEventListener('collide', (ev) => {
+        const v = Math.abs(ev.contact.getImpactVelocityAlongNormal());
+        const grpB = GIM.breakables && GIM.breakables[o.breakGroup];
+        if (v > 4.5 && grpB && !grpB.hit) grpB.hit = true;
+      });
+    }
 
     // ヒンジ（ちょうつがい）: 固定アンカーとつなぐ。モーターつきなら制御に使う
     if (o.hinge) {
@@ -1018,208 +1350,192 @@ function initPhysics() {
     }
   }
 
-  // ロープ: 天井アンカーから鎖状につなぐ
-  if (GIM.ropeStart !== undefined) {
-    const anchor = new CANNON.Body({
-      mass: 0,
-      position: new CANNON.Vec3(...GIM.ropeAnchor),
-      collisionFilterGroup: GROUP_WORLD,
-      collisionFilterMask: 0, // なにともぶつからない
-      shape: new CANNON.Sphere(0.05),
-    });
-    world.addBody(anchor);
-    let prev = anchor;
-    for (let i = 0; i < GIM.ropeLen; i++) {
-      const link = dynObjects[GIM.ropeStart + i].body;
-      world.addConstraint(new CANNON.DistanceConstraint(prev, link, 0.55));
-      prev = link;
+  // くさり/ロープ: 固定アンカー、または物（はねばしの先など）のローカル点からつなぐ
+  for (const ch of GIM.chains || []) {
+    let prev;
+    if (ch.anchor) {
+      prev = new CANNON.Body({
+        mass: 0,
+        position: new CANNON.Vec3(...ch.anchor),
+        collisionFilterGroup: GROUP_WORLD,
+        collisionFilterMask: 0, // なにともぶつからない
+        shape: new CANNON.Sphere(0.05),
+      });
+      world.addBody(prev);
+    } else {
+      prev = dynObjects[ch.attachIdx].body;
     }
+    ch.links.forEach((li, k) => {
+      const link = dynObjects[li].body;
+      if (k === 0 && !ch.anchor) {
+        // 物のローカル点（橋の先端など）に1番目のリンクをつなぐ
+        world.addConstraint(new CANNON.PointToPointConstraint(prev, new CANNON.Vec3(...ch.attachLocal), link, new CANNON.Vec3(0, 0, 0)));
+      } else {
+        world.addConstraint(new CANNON.DistanceConstraint(prev, link, ch.spacing));
+      }
+      prev = link;
+    });
+  }
+
+  // はねばし: 「これをつかんだら橋がおりる」ボディの集合を作っておく
+  for (const db of GIM.drawbridges || []) {
+    db.bodySet = new Set(db.grabIdxs.map((i) => dynObjects[i].body));
   }
 }
 
-const smoothstep = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
-
 /* ギミックをうごかす（毎固定ステップ・ホストのみ） */
 function stepGimmicks() {
-  // うごく足場（フェリー）
-  for (const pf of GIM.platforms || []) {
-    const b = dynObjects[pf.idx].body;
-    const target = pf.base + Math.sin(simT * pf.omega + (pf.phase || 0)) * pf.amp;
-    if (pf.axis === 'z') b.velocity.set(0, 0, (target - b.position.z) / FIXED_DT);
-    else b.velocity.set((target - b.position.x) / FIXED_DT, 0, 0);
-  }
-  // ぐるぐる回転バー
-  for (const sw of GIM.sweepers || []) {
-    dynObjects[sw.idx].body.angularVelocity.set(0, sw.omega, 0);
-  }
-  // ふりこ鉄球
-  for (const pd of GIM.pendulums) {
-    const th = 1.12 * Math.sin(simT * pd.omega + pd.phase);
-    const b = dynObjects[pd.idx].body;
-    const tx = pd.pivot[0] + Math.sin(th) * pd.L;
-    const ty = pd.pivot[1] - Math.cos(th) * pd.L;
-    b.velocity.set((tx - b.position.x) / FIXED_DT, (ty - b.position.y) / FIXED_DT, (pd.pivot[2] - b.position.z) / FIXED_DT);
-  }
-  // キネマティック物を目標へ動かす（速度でうごかす＝上に乗った物ごと運べる）
-  const driveTo = (idx, ax, val) => {
+  // キネマティック物を目標高さへ（速度でうごかす＝上に乗った物ごと運べる）
+  const driveY = (idx, targetY, vmax = 1.3) => {
     const b = dynObjects[idx].body;
-    const cur = ax === 'x' ? b.position.x : ax === 'y' ? b.position.y : b.position.z;
-    const v = (val - cur) / FIXED_DT;
-    if (ax === 'x') b.velocity.set(v, 0, 0);
-    else if (ax === 'y') b.velocity.set(0, v, 0);
-    else b.velocity.set(0, 0, v);
+    b.velocity.set(0, Math.max(-vmax, Math.min(vmax, (targetY - b.position.y) * 3)), 0);
   };
-  // ピストン（横からドンとつき出す・当たると落とされる）
-  for (const p of GIM.pistons || []) {
-    const q = ((simT + p.phase) % p.period) / p.period;
-    // 大半はひっこんでいて、一瞬ドンと出る
-    const e = q < 0.5 ? Math.max(0, 1 - Math.abs(q - 0.22) / 0.13) : 0;
-    driveTo(p.idx, p.axis, p.base + p.reach * e * p.dir);
-  }
-  // プレス機（上からドスンと落ちてくる）
-  for (const c of GIM.crushers || []) {
-    const q = ((simT + c.phase) % c.period) / c.period;
-    let e; // 0=上, 1=下
-    if (q < 0.12) e = q / 0.12;            // すばやく落ちる
-    else if (q < 0.32) e = 1;              // 下でとどまる
-    else if (q < 0.6) e = 1 - (q - 0.32) / 0.28; // ゆっくり上がる
-    else e = 0;                            // 上でまつ
-    driveTo(c.idx, 'y', c.top - c.drop * e);
-  }
-  // エレベーター（上下する床・はしで乗りおりできるよう長めにとどまる）
-  for (const el of GIM.elevators || []) {
-    const q = ((simT + el.phase) % el.period) / el.period;
-    let e;
-    if (q < 0.15) e = 0;                                   // 下でまつ（のる）
-    else if (q < 0.45) e = smoothstep((q - 0.15) / 0.3);  // のぼる
-    else if (q < 0.65) e = 1;                             // 上でまつ（おりる）
-    else if (q < 0.95) e = 1 - smoothstep((q - 0.65) / 0.3); // おりる
-    else e = 0;
-    driveTo(el.idx, 'y', el.y0 + (el.y1 - el.y0) * e);
-  }
-  // 回転床（ターンテーブル）
-  for (const tt of GIM.turntables || []) {
-    dynObjects[tt.idx].body.angularVelocity.set(0, tt.omega, 0);
-  }
-  // 送風ファン（上昇気流ゾーン・入ると上へふきあげられる）
-  for (const uf of GIM.updrafts || []) {
-    for (const doll of dolls.values()) {
-      const p = doll.torso.position;
-      if (Math.abs(p.x - uf.x) < uf.rx && Math.abs(p.z - uf.z) < uf.rz && p.y > uf.y0 && p.y < uf.y1) {
-        const t = doll.torso;
-        t.force.y += t.mass * (-GRAVITY + uf.lift);         // 重力を打ち消して押し上げる
-        t.velocity.y = Math.min(t.velocity.y, uf.vmax);     // 上がりすぎない
-        t.force.x += -t.velocity.x * t.mass * 0.8;          // 中央にとどまりやすく
-        t.force.z += -t.velocity.z * t.mass * 0.8;
-      }
+  const clamp = (v, a) => Math.max(-a, Math.min(a, v));
+
+  // ── 疑似摩擦: 箱・岩の水平速度を毎ステップ一定量へらす（クーロン摩擦の再現。
+  //    床との接触摩擦は0にしてあるため）。おせばうごき、はなすとすっととまる＝HFF風
+  for (const o of dynObjects) {
+    if (!o.body || o.kinematic || o.hinge || o.rope) continue;
+    const b = o.body;
+    if (Math.abs(b.velocity.y) > 1.2) continue;      // 空中（投げた箱・落下中）はへらさない
+    const v = b.velocity;
+    const sp = Math.hypot(v.x, v.z);
+    const dec = 0.03;                                // ≒摩擦係数0.16ぶんの減速/ステップ
+    if (sp <= dec * 2) {
+      v.x = 0;
+      v.z = 0;
+      b.angularVelocity.y *= 0.8;
+    } else {
+      const f = (sp - dec) / sp;
+      v.x *= f;
+      v.z *= f;
     }
-    for (const o of dynObjects) { // 木箱などもふきあがる
-      if (!o.body || o.kinematic || o.hinge) continue;
-      const p = o.body.position;
-      if (Math.abs(p.x - uf.x) < uf.rx && Math.abs(p.z - uf.z) < uf.rz && p.y > uf.y0 && p.y < uf.y1) {
-        o.body.wakeUp();
-        o.body.force.y += o.body.mass * (-GRAVITY + uf.lift * 0.7);
-      }
-    }
-  }
-  // レバー → はねばし（一度ひらいたらそのまま）
-  // ※ cannon-es のヒンジモーターは speed の符号が回転角と逆向きなので反転して使う
-  if (GIM.drawbridge) {
-    const db = GIM.drawbridge;
-    if (!db.open && Math.abs(hingeAngle(db.leverIdx)) > 0.35) {
-      db.open = true;
-      announce('🌉 レバーをひいた！はねばしがおりる…', 'lever');
-    }
-    const th = hingeAngle(db.idx);
-    const target = db.open ? 0 : db.upAngle;
-    dynObjects[db.idx].hingeC.setMotorSpeed(-Math.max(-1.3, Math.min(1.3, (target - th) * 4)));
   }
 
-  // カタパルト（レバーをひく → カウントダウン → 発射！）
-  if (GIM.catapult) {
-    const cp = GIM.catapult;
-    if (simT > cp.readyAt && Math.abs(hingeAngle(cp.leverIdx)) > 0.35) {
-      cp.fireAt = simT + 1.2;
-      cp.readyAt = simT + 7;
-      announce('🎯 カタパルト はっしゃ 3・2・1…！', 'catapult');
+  // ── 赤い押しボタン（手でおすと作動） → スライドドア ──
+  for (const bt of GIM.buttons) {
+    if (!bt.on) {
+      outer:
+      for (const doll of dolls.values()) {
+        for (const s of doll.sides) {
+          const hp = s.body.position;
+          if (Math.abs(hp.x - bt.pos[0]) < 0.5 && Math.abs(hp.y - bt.pos[1]) < 0.5 && Math.abs(hp.z - bt.pos[2]) < 0.55) {
+            bt.on = true;
+            announce(bt.msg || '🔴 ボタンをおした！', 'gate');
+            break outer;
+          }
+        }
+      }
     }
+    driveY(bt.capIdx, bt.pos[1] - (bt.on ? 0.12 : 0), 0.8);           // ボタンがしずむ
+    driveY(bt.doorIdx, bt.on ? bt.openY : bt.homeY, 1.1);
+  }
+
+  // ── 床スイッチ（おもみで作動。人がのってもOK） → とびら ──
+  for (const pd of GIM.pads) {
+    const [px, py, pz] = pd.padPos;
+    const onPad = (b) => Math.abs(b.position.x - px) < 0.95 && Math.abs(b.position.z - pz) < 0.95
+      && b.position.y > py - 0.25 && b.position.y < py + 1.3;
+    let pressed = false;
+    for (const doll of dolls.values()) if (onPad(doll.torso)) { pressed = true; break; }
+    if (!pressed) {
+      for (const o of dynObjects) {
+        if (o.body && !o.kinematic && !o.hinge && o.mass >= 8 && onPad(o.body)) { pressed = true; break; }
+      }
+    }
+    driveY(pd.padIdx, pd.padHomeY - (pressed ? 0.07 : 0), 0.5);
+    driveY(pd.gateIdx, pressed ? pd.gateOpenY : pd.gateHomeY, 1.2);
+    if (pressed && !pd.announced) {
+      pd.announced = true;
+      announce(pd.msg || '⚖️ おもみでとびらがひらいた！', 'gate');
+    }
+  }
+
+  // ── レバー式リフト: レバーをたおした向きでリフトが上下 ──
+  //    レバーは2安定式（いま命令している側へばねでもどる＝倒れっぱなしにならない）
+  for (const lf of GIM.lifts) {
+    const a = hingeAngle(lf.leverIdx);
+    if (a > 0.3 && lf.target !== lf.y1) {
+      lf.target = lf.y1;
+      announce('🛗 レバーON！リフトがあがる…', 'lever');
+    } else if (a < -0.3 && lf.target !== lf.y0) {
+      lf.target = lf.y0;
+      if (lf.moved) announce('🛗 リフトがさがる…', 'lever');
+    }
+    lf.moved = true;
+    const lever = dynObjects[lf.leverIdx].body;
+    const rest = lf.target === lf.y1 ? 0.45 : -0.45;
+    lever.torque.x += (rest - a) * 4 - lever.angularVelocity.x * 0.5;
+    driveY(lf.liftIdx, lf.target, lf.speed || 1.1);
+  }
+
+  // ── はねばし: たれたくさり（または橋そのもの）をつかむと下りてくる。下りたらそのまま ──
+  for (const db of GIM.drawbridges) {
+    const hinge = dynObjects[db.idx].hingeC;
+    const th = hingeAngle(db.idx);
+    if (!db.open) {
+      let pulled = false;
+      for (const doll of dolls.values()) {
+        for (const s of doll.sides) {
+          if (s.grabC && db.bodySet && db.bodySet.has(s.grabC.bodyB)) { pulled = true; break; }
+        }
+        if (pulled) break;
+      }
+      const target = pulled ? 0 : db.upAngle;
+      hinge.setMotorSpeed(-clamp((target - th) * 2.5, pulled ? 0.85 : 0.4));
+      if (th < 0.15) {
+        db.open = true;
+        announce('🌉 はねばしがおりた！おしろへ すすめ！', 'gate');
+      }
+    } else {
+      hinge.setMotorSpeed(-clamp((0 - th) * 3, 0.8));   // 下りたまま保持
+    }
+  }
+
+  // ── カタパルト: 発射台がわに岩のおもりがのると発射！かごの上の人がとぶ ──
+  for (const cp of GIM.catapults) {
     const hinge = dynObjects[cp.idx].hingeC;
-    if (cp.fireAt && simT >= cp.fireAt && simT < cp.fireAt + 0.55) {
-      hinge.setMotorSpeed(-9); // アームを勢いよくふりあげる（見た目）
+    const th = hingeAngle(cp.idx);
+    if (!cp.fireAt && simT > (cp.readyAt || 0)) {
+      for (const wi of cp.weights) {
+        const p = dynObjects[wi].body.position;
+        if (Math.abs(p.x - cp.pad[0]) < 1.0 && Math.abs(p.z - cp.pad[2]) < 1.05 && p.y > cp.pad[1] - 0.6 && p.y < cp.pad[1] + 1.2) {
+          cp.fireAt = simT + 0.35;
+          announce('🪨 おもりがのった！カタパルト はっしゃ！', 'catapult');
+          break;
+        }
+      }
+    }
+    if (cp.fireAt && simT >= cp.fireAt && simT < cp.fireAt + 0.5) {
+      hinge.setMotorSpeed(-8);   // かごがわを勢いよくふりあげる（見た目）
       if (!cp.launched) {
-        // 発射のしゅんかん、かごの上にいるプレイヤーをゴール方向へとばす
         cp.launched = true;
         for (const doll of dolls.values()) {
           const p = doll.torso.position;
-          if (Math.abs(p.x - cp.basket[0]) < 1.3 && Math.abs(p.z - cp.basket[2]) < 1.6 && p.y > cp.basket[1] - 0.6 && p.y < cp.basket[1] + 1.8) {
-            p.y += 1.0;                           // アームの円弧からうかせて干渉をふせぐ
-            doll.torso.velocity.set(3, 10, 9.5);  // ゴール塔（北東・x0 z43）がわへ！
+          if (Math.abs(p.x - cp.basket[0]) < 1.2 && Math.abs(p.z - cp.basket[2]) < 1.5 && p.y > cp.basket[1] - 0.6 && p.y < cp.basket[1] + 1.9) {
+            doll.releaseGrabs();
+            p.y += 0.9;                              // うでの円弧から浮かせて干渉をふせぐ
+            doll.torso.velocity.set(...cp.vel);      // はねばし・城門のほうへ！
             doll.torso.angularVelocity.setZero();
             doll.torso.wakeUp();
           }
         }
       }
+    } else if (cp.fireAt && simT >= cp.fireAt + 0.5) {
+      cp.fireAt = 0;
+      cp.launched = false;
+      cp.readyAt = simT + 6;                         // すこし休んでまた使える
     } else {
-      if (cp.fireAt && simT >= cp.fireAt + 0.55) { cp.fireAt = 0; cp.launched = false; }
-      const th = hingeAngle(cp.idx);
-      hinge.setMotorSpeed(-Math.max(-1.2, Math.min(1.2, (cp.rest - th) * 3)));
+      hinge.setMotorSpeed(-clamp((cp.rest - th) * 3, 1.2));   // かまえの角度にもどる
     }
   }
 
-  // ばねで0度にもどるレバー（カタパルト用・はなすと元にもどる）
-  for (const idx of GIM.springLevers || []) {
-    const o = dynObjects[idx];
-    if (o.hingeC && o.hinge.motorForce) continue; // モーター管理は別
-    // モーターなしレバーには弱いトルクでもどす
-    const th = hingeAngle(idx);
-    o.body.torque.x += -th * 1.1 - o.body.angularVelocity.x * 0.25;
-  }
-
-  // おもりのとびら: ふみ板に だれか/なにかが のっているあいだだけひらく
-  if (GIM.weightGate) {
-    const wg = GIM.weightGate;
-    const [px, py, pz] = wg.padPos;
-    const onPad = (b) => Math.abs(b.position.x - px) < 0.95 && Math.abs(b.position.z - pz) < 0.95
-      && b.position.y > py - 0.2 && b.position.y < py + 1.3;
-    let pressed = false;
-    for (const doll of dolls.values()) {
-      if (onPad(doll.torso)) { pressed = true; break; }
+  // ── こわせるかべ: つよい衝撃（衝突リスナーが検知）でくずれたらおしらせ ──
+  for (const bw of GIM.breakables) {
+    if (bw.hit && !bw.announced) {
+      bw.announced = true;
+      announce('💥 かべがくずれた！', 'thud');
     }
-    if (!pressed) {
-      for (const o of dynObjects) {
-        if (o.body && !o.kinematic && !o.hinge && o.mass >= 1 && onPad(o.body)) { pressed = true; break; }
-      }
-    }
-    const gate = dynObjects[wg.gateIdx].body;
-    const targetY = wg.homeY + (pressed ? -2.6 : 0);
-    gate.velocity.set(0, Math.max(-1.5, Math.min(1.5, (targetY - gate.position.y) * 3)), 0);
-    const pad = dynObjects[wg.padIdx].body;
-    const padY = 0.22 + (pressed ? -0.09 : 0);
-    pad.velocity.set(0, (padY - pad.position.y) * 6, 0);
-    if (pressed && !wg.announced) {
-      wg.announced = true;
-      announce('⚖️ おもみでとびらがひらいた！（はなれるとしまるよ）', 'gate');
-    }
-  }
-
-  // ボタン → とびら
-  if (GIM.gate !== undefined) {
-    if (!GIM.opened) {
-      for (const doll of dolls.values()) {
-        const p = doll.torso.position, bp = GIM.buttonPos;
-        if (Math.abs(p.x - bp[0]) < 0.8 && Math.abs(p.z - bp[2]) < 0.8 && p.y > bp[1] && p.y < bp[1] + 1.4) {
-          GIM.opened = true;
-          announce('🔴 ボタンをおした！とびらがひらく…', 'gate');
-          break;
-        }
-      }
-    }
-    const gate = dynObjects[GIM.gate].body;
-    const targetY = GIM.opened ? GIM.gateHomeY - 2.6 : GIM.gateHomeY;
-    gate.velocity.set(0, Math.max(-1.2, Math.min(1.2, (targetY - gate.position.y) * 3)), 0);
-    const btn = dynObjects[GIM.button].body;
-    const btnY = GIM.buttonPos[1] + (GIM.opened ? 0.08 : 0.19);
-    btn.velocity.set(0, (btnY - btn.position.y) * 6, 0);
   }
 }
 
@@ -1279,7 +1595,9 @@ class Doll {
     this.lastJump = 0;
     this.wetMsg = false;
     this.airTime = 0;
-    this.input = { x: 0, z: 0, j: 0, gl: 0, gr: 0, ap: 0.35 };
+    this.prevVy = 0;
+    this.armPhase = 0;
+    this.input = { x: 0, z: 0, j: 0, gl: 0, gr: 0, ap: 0 };
 
     const grp = playerGroup(colorIdx);
     const mask = ~grp;
@@ -1300,7 +1618,7 @@ class Doll {
     torso.dollId = id;
     torso.addEventListener('collide', (ev) => {
       const v = Math.abs(ev.contact.getImpactVelocityAlongNormal());
-      if (v > 9) { this.limpUntil = simT + 1.1; this.hitSound('thud'); } // つよい衝撃でのびる
+      if (v > 8) { this.limpUntil = Math.max(this.limpUntil, simT + 1.0); this.hitSound('thud'); } // つよい衝撃でのびる
     });
     world.addBody(torso);
     this.torso = torso;
@@ -1319,7 +1637,7 @@ class Doll {
       hand.allowSleep = false;
       hand.dollId = id;
       world.addBody(hand);
-      this.sides.push({ sx, body: hand, grabC: null, holdC: null, cool: 0 });
+      this.sides.push({ sx, body: hand, grabC: null, holdC: null, cool: 0, elev: 0.6 });
     }
 
     this.place(false); // ゲーム開始時はチェックポイントに立って開始
@@ -1400,7 +1718,6 @@ class Doll {
   control() {
     const inp = this.input;
     const torso = this.torso;
-    const limp = simT < this.limpUntil;
 
     // 接地チェック（自分以外になにか触れているか、下にレイ）
     const from = torso.position;
@@ -1421,78 +1738,103 @@ class Doll {
     }
     const hanging = this.grabbing;
 
-    // 着地音（空中→接地の瞬間だけ・歩行中の接触では鳴らさない）
+    // 着地: 音＋「高速落下→着地」で0.5-1.0秒ラグドール脱力（入力無効・倒れる）→起き上がり
     if (grounded) {
       if (this.airTime > 0.28) this.hitSound('land');
+      if (this.prevVy < -HARD_FALL_V && this.airTime > 0.25) {
+        this.limpUntil = Math.max(this.limpUntil, simT + LIMP_TIME);
+        // ばたっと倒れるよう軽くランダムに回す
+        torso.angularVelocity.x += (Math.random() - 0.5) * 4;
+        torso.angularVelocity.z += (Math.random() - 0.5) * 4;
+        this.hitSound('thud');
+      }
       this.airTime = 0;
     } else {
       this.airTime += FIXED_DT;
     }
+    const limp = simT < this.limpUntil;
 
-    // トランポリン
+    // トランポリン（重力が軽いぶん初速を補正して以前と同じ高さに）
     if (grounded && ray.body.bouncePad && torso.velocity.y < 2) {
-      torso.velocity.y = ray.body.bouncePad;
+      torso.velocity.y = ray.body.bouncePad * Math.sqrt(-GRAVITY / 18);
     }
 
     if (!limp) {
       // ── バランス（起き上がりトルク・ばね式でふにゃっとする）
+      //    ジャンプ・落下中は30-50%に減衰して「脱力して飛ぶ」
+      const posture = (grounded || hanging) ? 1 : AIR_POSTURE;
       const bodyUp = torso.quaternion.vmult(new CANNON.Vec3(0, 1, 0));
       const axis = bodyUp.cross(new CANNON.Vec3(0, 1, 0));
-      torso.torque.x += axis.x * 150 - torso.angularVelocity.x * 14;
-      torso.torque.z += axis.z * 150 - torso.angularVelocity.z * 14;
+      torso.torque.x += (axis.x * 150 - torso.angularVelocity.x * 14) * posture;
+      torso.torque.z += (axis.z * 150 - torso.angularVelocity.z * 14) * posture;
 
       // ── 移動は速度ブレンド方式（力だと摩擦との偶力で倒れてしまう）
+      //    加速はゆっくり（最高速まで~0.5秒）・旋回ももっさり
       const gvx = groundVel ? groundVel.x : 0;
       const gvz = groundVel ? groundVel.z : 0;
       const mlen = Math.hypot(inp.x, inp.z);
       if (mlen > 0.15) {
-        // 進行方向をむく
+        // 進行方向をむく（ゆっくり旋回）
         const fwd = torso.quaternion.vmult(new CANNON.Vec3(0, 0, 1));
         let d = Math.atan2(inp.x, inp.z) - Math.atan2(fwd.x, fwd.z);
         while (d > Math.PI) d -= Math.PI * 2;
         while (d < -Math.PI) d += Math.PI * 2;
-        torso.torque.y += d * 22 - torso.angularVelocity.y * 4;
+        torso.torque.y += d * 12 - torso.angularVelocity.y * 3.5;
 
         const s = Math.min(1, mlen);
-        const tvx = gvx + (inp.x / mlen) * 4.2 * s;
-        const tvz = gvz + (inp.z / mlen) * 4.2 * s;
-        const k = grounded ? 0.18 : 0.045;
+        const tvx = gvx + (inp.x / mlen) * WALK_SPEED * s;
+        const tvz = gvz + (inp.z / mlen) * WALK_SPEED * s;
+        const k = grounded ? WALK_ACCEL : AIR_ACCEL;
         torso.velocity.x += (tvx - torso.velocity.x) * k;
         torso.velocity.z += (tvz - torso.velocity.z) * k;
       } else {
-        torso.torque.y += -torso.angularVelocity.y * 4;
+        torso.torque.y += -torso.angularVelocity.y * 3.5;
         if (grounded) {
           // 立ちどまるブレーキ（うごく床の速度にあわせる）
-          torso.velocity.x += (gvx - torso.velocity.x) * 0.16;
-          torso.velocity.z += (gvz - torso.velocity.z) * 0.16;
+          torso.velocity.x += (gvx - torso.velocity.x) * 0.12;
+          torso.velocity.z += (gvz - torso.velocity.z) * 0.12;
         }
       }
 
       // ── ジャンプ（ぶらさがり中は手をはなして跳ぶ）
       if (inp.j !== this.lastJump) {
         this.lastJump = inp.j;
-        if (grounded) torso.velocity.y = 7.2;
-        else if (hanging) { this.releaseGrabs(); torso.velocity.y = 6.2; }
+        if (grounded) torso.velocity.y = JUMP_SPEED;
+        else if (hanging) { this.releaseGrabs(); torso.velocity.y = HANG_JUMP; }
       }
+    } else {
+      this.lastJump = inp.j; // 脱力中のジャンプ入力はすてる
     }
 
-    // ── うで（左右べつべつ・カメラの上下でうでの高さがかわる）
+    // ── うで（左右べつべつ）: つかみ中の目標角度＝カメラピッチに1:1連動
+    //    可動域 下-30°〜頭上+170°。バネで遅れて追従して「ふにゃ」感を出す
+    const vp = Math.min(2.4, Math.max(-1.25, Number.isFinite(+inp.ap) ? +inp.ap : 0)); // 視線の上下(+が上)
+    const armTarget = Math.min(2.97, Math.max(-0.52,
+      vp >= 0 ? 0.30 + vp * 2.19 : 0.30 + vp * 0.78)); // rad: 見下ろし-30° / 正面~17° / 見上げ170°
+    // つかんでいない手は歩行にあわせて前後スイング（物理バネなので遅れ・オーバーシュートが出る）
+    const hsp = Math.hypot(torso.velocity.x, torso.velocity.z);
+    this.armPhase += hsp * FIXED_DT * 3.4;
+    const swing = Math.min(1, hsp / WALK_SPEED) * 0.26;
+
     for (const s of this.sides) {
       const hand = s.body;
       const grab = !limp && (s.sx < 0 ? inp.gl : inp.gr);
+      s.elev += (armTarget - s.elev) * 0.14; // バネ的な遅れ
       let local;
       if (grab) {
-        const elev = Math.min(1.15, Math.max(-0.35, 0.75 - (Number.isFinite(+inp.ap) ? +inp.ap : 0.35)));
-        local = new CANNON.Vec3(0.24 * s.sx, Math.sin(elev) * 0.72, Math.cos(elev) * 0.72);
+        local = new CANNON.Vec3(0.26 * s.sx, 0.12 + Math.sin(s.elev) * ARM_LEN, Math.cos(s.elev) * ARM_LEN);
       } else {
-        local = new CANNON.Vec3(0.42 * s.sx, -0.1, 0.06);  // 体のよこ
+        const ph = this.armPhase + (s.sx < 0 ? Math.PI : 0);
+        local = new CANNON.Vec3(0.42 * s.sx, -0.08, 0.05 + Math.sin(ph) * swing); // 体のよこ＋歩行スイング
       }
       const target = torso.pointToWorldFrame(local, new CANNON.Vec3());
-      hand.force.x += (target.x - hand.position.x) * 32 - hand.velocity.x * 3;
-      hand.force.y += (target.y - hand.position.y) * 32 - hand.velocity.y * 3 - GRAVITY * hand.mass;
-      hand.force.z += (target.z - hand.position.z) * 32 - hand.velocity.z * 3;
+      // 脱力中はうでもだらんとする（バネよわめ・重力補償なし）
+      const K = limp ? 6 : 30, D = limp ? 1.5 : 3.2;
+      hand.force.x += (target.x - hand.position.x) * K - hand.velocity.x * D;
+      hand.force.y += (target.y - hand.position.y) * K - hand.velocity.y * D - (limp ? 0 : GRAVITY * hand.mass);
+      hand.force.z += (target.z - hand.position.z) * K - hand.velocity.z * D;
 
-      // ── つかむ / はなす（手ごとに独立 → 手わたりで登れる）
+      // ── つかむ / はなす（手ごとに独立 → 片手ずつ掛け替えて登れる）
       if (grab) {
         if (!s.grabC && simT > s.cool) this.tryGrab(s);
       } else if (s.grabC) {
@@ -1500,30 +1842,36 @@ class Doll {
       }
     }
 
-    // ── よじのぼり（本家方式）: 高いところにつかまってぶら下がり、
-    //    カメラを下にむける（＝腕を下げる）と体がひきあがる。前に入力すると乗りこえる
+    // ── よじのぼり（本家の文法）: 上を見て掴む → 下を見ながら前進 →
+    //    胴体が拘束点（手）の方向へ引き寄せられて持ち上がる
     if (!limp) {
-      const ap = Number.isFinite(+inp.ap) ? +inp.ap : 0.35;
-      const pull = Math.min(1, Math.max(0, (ap - 0.35) / 0.7)); // 下をむくほど1に近づく＝ひきあげ
+      const pull = Math.min(1, Math.max(0, (0.15 - vp) / 0.85)); // 下をむくほど1（vp<0.15で効きはじめ）
       let fx, fz;
       const ml = Math.hypot(inp.x, inp.z);
       if (ml > 0.15) { fx = inp.x / ml; fz = inp.z / ml; }
       else { const f = torso.quaternion.vmult(new CANNON.Vec3(0, 0, 1)); fx = f.x; fz = f.z; }
+      const fwdBoost = ml > 0.15 ? 1 : 0.45; // 前進入力で引きあげが強まる
       let mantle = null;
       for (const s of this.sides) {
         if (!s.grabC || !s.holdC) continue;
-        const hy = s.body.position.y;
+        const hp = s.body.position;
+        const hy = hp.y;
         if (hy > torso.position.y - 0.05) {          // 手が体と同じ高さ以上＝つかまっている
-          // カメラの上下でホールド距離をきめる（下をむく＝みじかく＝体があがる＝カメラ操作でひきあげ）
-          const targetDist = 0.72 - pull * 0.5;      // 0.72(ぶらさがり) 〜 0.22(ひきあげ)
+          // ホールド距離: 下をむくほど短く＝体が手にひきよせられる
+          const targetDist = 0.72 - pull * fwdBoost * 0.5; // 0.72(ぶらさがり)〜0.22(ひきあげ)
           s.holdC.distance += (targetDist - s.holdC.distance) * 0.3;
-          if (pull > 0.15) {
-            // 下をむいているあいだ 重力を上まわる力で体を手の高さへひきあげる（速度制限つき）
-            if (torso.velocity.y < 3.0) torso.force.y += torso.mass * (-GRAVITY) * (1.4 + pull * 0.8);
+          if (pull > 0.05 && torso.velocity.y < 3.0) {
+            // 胴体を拘束点方向へ引き寄せる力（重力に打ち勝つ・速度制限つき）
+            const dx = hp.x - torso.position.x, dy = hy - torso.position.y, dz = hp.z - torso.position.z;
+            const dl = Math.hypot(dx, dy, dz) || 1;
+            const F = torso.mass * -GRAVITY * (1.1 + 1.6 * pull * fwdBoost);
+            torso.force.x += (dx / dl) * F * 0.5;
+            torso.force.y += Math.max(0.25, dy / dl) * F;
+            torso.force.z += (dz / dl) * F * 0.5;
           }
-          // 乗りこえ: カメラで体をひきあげ切った状態（手のすぐ下）で前入力 → ふちの上へ乗りこえる
+          // 乗りこえ: 体を手のすぐ下まで引きあげた状態で下をむき前進 → ふちの上へ
           if (!mantle && pull > 0.5 && ml > 0.15 && torso.position.y > hy - 0.34) {
-            mantle = { hx: s.body.position.x, hy, hz: s.body.position.z };
+            mantle = { hx: hp.x, hy, hz: hp.z };
           }
         }
       }
@@ -1536,6 +1884,8 @@ class Doll {
         for (const s of this.sides) s.cool = simT + 0.4;   // すぐ再グラブしない
       }
     }
+
+    this.prevVy = torso.velocity.y; // 着地時の落下速度判定用（step前の速度）
   }
 
   removeFromWorld() {
@@ -1551,7 +1901,10 @@ class Doll {
 const keys = new Set();
 let jumpCount = 0;
 let mouseGrabL = false, mouseGrabR = false, keyGrab = false, touchGrab = false;
-let camYaw = Math.PI, camPitch = 0.35, camDist = 6.5;
+// カメラ: camPitch はカメラの高さ角（＋＝上から見下ろし）。視線ピッチは -camPitch
+const PITCH_MIN = -1.22, PITCH_MAX = 1.05;   // 見上げ+70° 〜 見下ろし-60°
+let camYaw = Math.PI, camPitch = 0.22, camDist = 4.2;
+let touchArmOff = 0;   // モバイル: ✊ボタン上下ドラッグ＝うでの高さオフセット（カメラと独立）
 const stickVec = { x: 0, y: 0 };
 
 window.addEventListener('keydown', (e) => {
@@ -1567,19 +1920,26 @@ window.addEventListener('keyup', (e) => {
 });
 window.addEventListener('blur', () => { keys.clear(); keyGrab = false; mouseGrabL = false; mouseGrabR = false; });
 
-// マウス: 左長押し=左手 / 右長押し=右手 / ドラッグ=カメラ
+// マウス: 左長押し=左手 / 右長押し=右手。PCはPointer Lock（クリックでロック・Escで解除）
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'touch') { touchCamStart(e); return; }
+  if (state === 'play' && !IS_TOUCH && !document.pointerLockElement && canvas.requestPointerLock) {
+    try {
+      const p = canvas.requestPointerLock();
+      if (p && p.catch) p.catch(() => { /* 非対応・拒否でもドラッグ操作で遊べる */ });
+    } catch (err) { /* 同上 */ }
+  }
   if (e.button === 0 && !mouseGrabL) { mouseGrabL = true; if (state === 'play') Sound.play('grab'); }
   if (e.button === 2 && !mouseGrabR) { mouseGrabR = true; if (state === 'play') Sound.play('grab'); }
-  canvas.setPointerCapture(e.pointerId);
+  if (!document.pointerLockElement) canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'touch') { touchCamMove(e); return; }
-  if (e.buttons) {
-    camYaw -= e.movementX * 0.005;
-    camPitch = Math.min(1.25, Math.max(-0.15, camPitch + e.movementY * 0.005));
+  // ロック中はマウス移動＝カメラ。未ロック時はドラッグでカメラ（フォールバック）
+  if (document.pointerLockElement === canvas || e.buttons) {
+    camYaw -= e.movementX * 0.0032;
+    camPitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, camPitch + e.movementY * 0.0032));
   }
 });
 canvas.addEventListener('pointerup', (e) => {
@@ -1588,17 +1948,17 @@ canvas.addEventListener('pointerup', (e) => {
   if (e.button === 2) mouseGrabR = false;
 });
 canvas.addEventListener('wheel', (e) => {
-  camDist = Math.min(10, Math.max(3.5, camDist * (e.deltaY > 0 ? 1.1 : 0.9)));
+  camDist = Math.min(6.5, Math.max(3.2, camDist * (e.deltaY > 0 ? 1.1 : 0.9)));
   e.preventDefault();
 }, { passive: false });
 
-// タッチカメラ（キャンバス上のスワイプ）
+// タッチカメラ（右半面をふくむキャンバス上のスワイプ）
 let camTouchId = null, camTouchLast = null;
 function touchCamStart(e) { if (camTouchId === null) { camTouchId = e.pointerId; camTouchLast = { x: e.clientX, y: e.clientY }; } }
 function touchCamMove(e) {
   if (e.pointerId !== camTouchId) return;
-  camYaw -= (e.clientX - camTouchLast.x) * 0.007;
-  camPitch = Math.min(1.25, Math.max(-0.15, camPitch + (e.clientY - camTouchLast.y) * 0.007));
+  camYaw -= (e.clientX - camTouchLast.x) * 0.006;
+  camPitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, camPitch + (e.clientY - camTouchLast.y) * 0.006));
   camTouchLast = { x: e.clientX, y: e.clientY };
 }
 function touchCamEnd(e) { if (e.pointerId === camTouchId) camTouchId = null; }
@@ -1627,11 +1987,25 @@ function stickEnd(e) {
 stickEl.addEventListener('pointerup', stickEnd);
 stickEl.addEventListener('pointercancel', stickEnd);
 
-// タッチボタン
+// タッチボタン。✊は押しっぱなし=両手つかみ＋押したまま上下ドラッグ=うでの高さ
 const tJump = $('t-jump'), tGrab = $('t-grab');
 tJump.addEventListener('pointerdown', (e) => { e.preventDefault(); jumpCount++; Sound.play('jump'); });
-tGrab.addEventListener('pointerdown', (e) => { e.preventDefault(); touchGrab = true; tGrab.classList.add('on'); Sound.play('grab'); });
-const grabOff = () => { touchGrab = false; tGrab.classList.remove('on'); };
+let grabDragId = null, grabDragY = 0;
+tGrab.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  touchGrab = true;
+  tGrab.classList.add('on');
+  Sound.play('grab');
+  grabDragId = e.pointerId;
+  grabDragY = e.clientY;
+  try { tGrab.setPointerCapture(e.pointerId); } catch (err) { /* 非対応でもOK */ }
+});
+tGrab.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== grabDragId) return;
+  // 上へドラッグ＝うでを上げる / 下へドラッグ＝下げる（カメラピッチとは独立のオフセット）
+  touchArmOff = Math.min(1.7, Math.max(-0.9, (grabDragY - e.clientY) / 90));
+});
+const grabOff = () => { touchGrab = false; touchArmOff = 0; grabDragId = null; tGrab.classList.remove('on'); };
 tGrab.addEventListener('pointerup', grabOff);
 tGrab.addEventListener('pointercancel', grabOff);
 
@@ -1672,7 +2046,7 @@ function localInput() {
     x: r2(x), z: r2(z), j: jumpCount,
     gl: (mouseGrabL || both) ? 1 : 0,   // 左手
     gr: (mouseGrabR || both) ? 1 : 0,   // 右手
-    ap: r2(camPitch),                   // カメラの上下 → うでの高さ
+    ap: r2(-camPitch + touchArmOff),    // 視線ピッチ(+上)＋モバイルの腕オフセット → うでの高さ
   };
 }
 
@@ -1828,7 +2202,7 @@ function enterPlay() {
   panelEl.classList.add('hidden');
   hudEl.classList.remove('hidden');
   updatePlayersHud();
-  showMsg('🚩 ゴールの旗をめざそう！ ✊つかむ で よじのぼり', 3600);
+  showMsg(IS_TOUCH ? '🚩 ゴールの旗をめざそう！ ✊で つかんで よじのぼり' : '🚩 ゴールの旗をめざそう！ クリックでマウス視点ON（Escで解除）', 3600);
   Sound.startAmbient(courseIdx);
 }
 
@@ -1893,7 +2267,7 @@ function wireGuest(conn) {
         doll.input = {
           x: +m.x || 0, z: +m.z || 0, j: +m.j || 0,
           gl: m.gl ? 1 : 0, gr: m.gr ? 1 : 0,
-          ap: Number.isFinite(+m.ap) ? +m.ap : 0.35,
+          ap: Number.isFinite(+m.ap) ? +m.ap : 0,
         };
       }
     } else if (m.t === 'rs' && pid !== null) {
@@ -2095,7 +2469,7 @@ function hostStep(dt, now) {
       t.position, t.quaternion,
       [doll.sides[0].body.position.x, doll.sides[0].body.position.y, doll.sides[0].body.position.z],
       [doll.sides[1].body.position.x, doll.sides[1].body.position.y, doll.sides[1].body.position.z],
-      (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0), dt,
+      (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0) | (simT < doll.limpUntil ? 4 : 0), dt,
     );
   }
   for (const o of dynObjects) {
@@ -2116,7 +2490,8 @@ function hostStep(dt, now) {
         r3(t.quaternion.x), r3(t.quaternion.y), r3(t.quaternion.z), r3(t.quaternion.w),
         r2(hl.x), r2(hl.y), r2(hl.z),
         r2(hr.x), r2(hr.y), r2(hr.z),
-        (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0),
+        // フラグ: bit0=左手 bit1=右手 bit2=脱力（ゲストの見た目リグ用）
+        (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0) | (simT < doll.limpUntil ? 4 : 0),
       ]);
     }
     const o = dynObjects.map((ob) => [
@@ -2169,19 +2544,32 @@ function guestStep(now) {
   }
 }
 
-/* カメラ */
-const camTargetSm = new THREE.Vector3(0, 1, 0);
-function updateCam() {
+/* カメラ: ピボット=胸〜頭(地上高~1.4m)・距離3.5-4.5m・指数スムージング・壁めり込み回避 */
+const camTargetSm = new THREE.Vector3(0, 1.4, 0);
+const _camPivot = new THREE.Vector3();
+const _camDir = new THREE.Vector3();
+const _camRay = new THREE.Raycaster();
+function updateCam(dt) {
   const rig = rigs.get(myId);
   if (!rig) return;
-  camTargetSm.lerp(rig.group.position, 0.18);
+  // ピボットは指数スムージング（ラグドールの細かい揺れを拾いすぎない）
+  _camPivot.copy(rig.group.position);
+  _camPivot.y += 0.75; // 胴中心(~0.65m)+0.75 ≒ 地上高1.4m
+  camTargetSm.lerp(_camPivot, 1 - Math.exp(-(dt || 0.016) * 9));
   const cp = Math.cos(camPitch), spitch = Math.sin(camPitch);
+  _camDir.set(Math.sin(camYaw) * cp, spitch, Math.cos(camYaw) * cp); // ピボット→カメラ方向（単位）
+  // 壁にめり込まないようレイキャストして距離を詰める
+  let dist = camDist;
+  _camRay.set(camTargetSm, _camDir);
+  _camRay.far = camDist + 0.3;
+  const hits = _camRay.intersectObjects(levelRoot.children, true);
+  if (hits.length) dist = Math.max(0.6, Math.min(dist, hits[0].distance - 0.25));
   camera.position.set(
-    camTargetSm.x + Math.sin(camYaw) * cp * camDist,
-    camTargetSm.y + spitch * camDist + 0.6,
-    camTargetSm.z + Math.cos(camYaw) * cp * camDist,
+    camTargetSm.x + _camDir.x * dist,
+    camTargetSm.y + _camDir.y * dist,
+    camTargetSm.z + _camDir.z * dist,
   );
-  camera.lookAt(camTargetSm.x, camTargetSm.y + 0.6, camTargetSm.z);
+  camera.lookAt(camTargetSm);
 }
 
 function menuCam(now) {
@@ -2218,14 +2606,21 @@ function updatePreview(now) {
 }
 refreshPreview();
 
-/* ワイヤー・ロープの見た目を2点間に張りなおす（ホスト/ゲスト共通） */
+/* ワイヤー・ロープの見た目を2点間に張りなおす（ホスト/ゲスト共通）
+   端点は [x,y,z]（固定点）/ 数値（dynObjects index）/ {i, off}（物のローカル点） */
 const _rodV1 = new THREE.Vector3(), _rodV2 = new THREE.Vector3();
+function rodEnd(e, v) {
+  if (Array.isArray(e)) return v.set(e[0], e[1], e[2]);
+  if (typeof e === 'object') {
+    const m = dynObjects[e.i].mesh;
+    return v.set(e.off[0], e.off[1], e.off[2]).applyQuaternion(m.quaternion).add(m.position);
+  }
+  return v.copy(dynObjects[e].mesh.position);
+}
 function updateRods() {
   for (const rod of GIM.rods) {
-    const a = Array.isArray(rod.from)
-      ? _rodV1.set(rod.from[0], rod.from[1], rod.from[2])
-      : _rodV1.copy(dynObjects[rod.from].mesh.position);
-    const b = _rodV2.copy(dynObjects[rod.toIdx].mesh.position);
+    const a = rodEnd(rod.from, _rodV1);
+    const b = rodEnd(rod.to, _rodV2);
     rod.mesh.position.copy(a).add(b).multiplyScalar(0.5);
     const d = b.sub(a);
     const len = Math.max(0.01, d.length());
@@ -2243,7 +2638,7 @@ function animate(now) {
   if (state === 'play') {
     if (isHost) hostStep(dt, now);
     else guestStep(now);
-    updateCam();
+    updateCam(dt);
   } else {
     menuCam(now);
   }
