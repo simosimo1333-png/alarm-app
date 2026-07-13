@@ -1105,19 +1105,29 @@ class Rig {
     const accentMat = skin.c === 0 ? bodyMat : new THREE.MeshStandardMaterial({ color: accent, roughness: 0.75 });
 
     this.group = new THREE.Group();
+    // 体のパーツはぜんぶ bodyGrp にまとめ、加減速リーン・歩行スイングをグループごとかける
+    this.bodyGrp = new THREE.Group();
+    this.group.add(this.bodyGrp);
 
     // 腰まわり（下半身・オフホワイト）
     const hips = new THREE.Mesh(new THREE.SphereGeometry(0.27, 14, 10), bodyMat);
     hips.scale.set(1, 0.82, 0.9);
     hips.position.y = -0.3;
-    // 樽型の胴（上半身＝差し色）
-    const chest = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.3, 6, 14), accentMat);
+    // 樽型の胴（オフホワイト）
+    const chest = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.3, 6, 14), bodyMat);
     chest.scale.set(1, 1, 0.88);
     chest.position.y = 0.06;
-    hips.castShadow = chest.castShadow = true;
-    this.group.add(hips, chest);
+    // むねの前面パネル（差し色）: どのスキン色でも前後がひと目で分かる。背面は無地
+    const bibMat = skin.c === 0
+      ? new THREE.MeshStandardMaterial({ color: 0xd8d3c8, roughness: 0.75 }) // デフォルト時はうすいグレージュ
+      : accentMat;
+    const bib = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 12), bibMat);
+    bib.scale.set(1.05, 1.5, 0.62);
+    bib.position.set(0, 0.03, 0.16);
+    hips.castShadow = chest.castShadow = bib.castShadow = true;
+    this.bodyGrp.add(hips, chest, bib);
 
-    // 首＋頭（まるく大きめ・顔ディテールなし）。headGrpごと揺らして「遅れ」を出す
+    // 首＋頭（まるく大きめ）。headGrpごと揺らして「遅れ」を出す
     this.headGrp = new THREE.Group();
     this.headGrp.position.y = 0.5;
     const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.115, 0.16, 10), bodyMat);
@@ -1125,13 +1135,20 @@ class Rig {
     head.position.y = 0.27; // ワールド~0.77（ぼうし位置は旧頭と同じ）
     neck.castShadow = head.castShadow = true;
     this.headGrp.add(neck, head);
+    // ひかえめな顔（小さな黒目2つ・前面の向きキュー）
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0x30343c, roughness: 0.4 });
+    for (const sx of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), eyeMat);
+      eye.position.set(0.074 * sx, 0.315, 0.196);
+      this.headGrp.add(eye);
+    }
     if (skin.h) {
       const hatHolder = new THREE.Group();
-      hatHolder.position.y = -0.5; // addHatTo は胴中心原点の座標系なので相殺
+      hatHolder.position.y = -0.5; // addHatTo は胴中心原点の座標系なので相殺（つばは+z=前向き）
       addHatTo(hatHolder, skin.h, accent);
       this.headGrp.add(hatHolder);
     }
-    this.group.add(this.headGrp);
+    this.bodyGrp.add(this.headGrp);
 
     // あし（太い円筒＋ミトン状の足・ひざなし。バネ追従でオーバーシュート）
     this.legs = [];
@@ -1146,7 +1163,7 @@ class Rig {
       foot.position.y = -0.25;
       leg.castShadow = foot.castShadow = true;
       hip.add(leg, foot);
-      this.group.add(hip);
+      this.bodyGrp.add(hip);
       this.legs.push(hip);
     }
 
@@ -1178,6 +1195,9 @@ class Rig {
     this.yawVelSm = 0;
     this.lastYaw = 0;
     this.limpSm = 0;
+    this.t = 0;               // アイドルゆらゆら用の経過時間
+    this.vx = 0; this.vz = 0; // 前フレーム速度（加速度の算出用）
+    this.axSm = 0; this.azSm = 0; // 平滑化した加速度（慣性リーン用）
   }
 
   // p:Vector3ふう, q:Quaternionふう, hl/hr: [x,y,z],
@@ -1190,11 +1210,18 @@ class Rig {
     g.quaternion.set(q.x, q.y, q.z, q.w);
     g.updateMatrixWorld();
 
-    // 移動・旋回・落下スピードを平滑化（慣性のある手続きアニメ用）
+    // 移動・旋回・落下スピードと加速度を平滑化（慣性のある手続きアニメ用）
     if (dt > 0) {
-      const sp = _tv1.set(p.x - this.lastPos.x, 0, p.z - this.lastPos.z).length() / dt;
+      const vx = (p.x - this.lastPos.x) / dt, vz = (p.z - this.lastPos.z) / dt;
+      const sp = Math.hypot(vx, vz);
       this.speedSm += (Math.min(sp, 5) - this.speedSm) * Math.min(1, dt * 10);
       this.phase += this.speedSm * dt * 3.4;
+      this.t += dt;
+      // 加速度（クランプ＋平滑化 → 慣性リーン用）
+      const kA = Math.min(1, dt * 5);
+      this.axSm += (Math.min(8, Math.max(-8, (vx - this.vx) / dt)) - this.axSm) * kA;
+      this.azSm += (Math.min(8, Math.max(-8, (vz - this.vz) / dt)) - this.azSm) * kA;
+      this.vx = vx; this.vz = vz;
       const vy = (p.y - this.lastPos.y) / dt;
       this.vySm += (Math.min(6, Math.max(-6, vy)) - this.vySm) * Math.min(1, dt * 6);
       const yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.z * q.z));
@@ -1209,28 +1236,40 @@ class Rig {
 
     // あし: バネで目標角へ追従（遅れ＋オーバーシュート＝ふにゃふにゃ千鳥足）
     const walkAmp = Math.min(this.speedSm / WALK_SPEED, 1);
-    const amp = walkAmp * 0.72 * (1 - this.limpSm);
+    const amp = walkAmp * 0.78 * (1 - this.limpSm);
     for (let i = 0; i < 2; i++) {
       const st = this.legState[i];
       const target = Math.sin(this.phase + (i ? Math.PI : 0)) * amp + this.limpSm * (i ? -0.85 : 0.55);
       if (dt > 0) {
-        st.v += (target - st.a) * 130 * dt - st.v * 9 * dt;
+        st.v += (target - st.a) * 110 * dt - st.v * 7 * dt; // 柔らかめ＝もっと遅れて跳ねる
         st.a += st.v * dt;
       } else st.a = target;
       this.legs[i].rotation.x = st.a;
       this.legs[i].rotation.z = (i ? -1 : 1) * -this.limpSm * 0.45;
     }
 
+    // 胴: 加減速・旋回の慣性でリーン＋腰・肩の左右スイング＋上下ボブ＋アイドルゆらゆら
+    const upr = 1 - this.limpSm;
+    const cy = Math.cos(this.lastYaw), sy = Math.sin(this.lastYaw);
+    const aFwd = this.axSm * sy + this.azSm * cy;   // ローカル前方向の加速度
+    const aSide = this.axSm * cy - this.azSm * sy;  // ローカル右方向の加速度
+    this.bodyGrp.rotation.x = (aFwd * 0.028 + Math.sin(this.phase * 2) * 0.03 * walkAmp) * upr;
+    this.bodyGrp.rotation.z = (-aSide * 0.024 + Math.sin(this.phase) * 0.09 * walkAmp
+      + Math.sin(this.t * 1.7) * 0.018 + Math.sin(this.t * 2.9) * 0.01) * upr;
+    this.bodyGrp.rotation.y = Math.sin(this.phase) * 0.11 * walkAmp * upr;   // 肩ふり
+    this.bodyGrp.position.y = -Math.abs(Math.cos(this.phase)) * 0.05 * walkAmp; // 一歩ごとのボブ
+    g.updateMatrixWorld(true); // リーン反映後の行列でうで・かたを張る
+
     // あたま: 旋回・落下に遅れてついてくる＋歩行ボブ。脱力中はがくっと前へ
-    this.headGrp.rotation.y = -this.yawVelSm * 0.09;
-    this.headGrp.rotation.x = -this.vySm * 0.05 + Math.sin(this.phase * 2) * 0.05 * walkAmp + this.limpSm * 0.5;
-    this.headGrp.rotation.z = Math.sin(this.phase) * 0.045 * walkAmp;
+    this.headGrp.rotation.y = -this.yawVelSm * 0.14;
+    this.headGrp.rotation.x = -this.vySm * 0.08 - aFwd * 0.018 + Math.sin(this.phase * 2) * 0.06 * walkAmp + this.limpSm * 0.5;
+    this.headGrp.rotation.z = Math.sin(this.phase + 0.7) * 0.08 * walkAmp + aSide * 0.015;
 
     // うで
     const hands = [hl, hr];
     for (let i = 0; i < 2; i++) {
       const sx = i === 0 ? -1 : 1;
-      const shoulder = _tv1.set(0.27 * sx, 0.3, 0).applyMatrix4(g.matrixWorld);
+      const shoulder = _tv1.set(0.27 * sx, 0.3, 0).applyMatrix4(this.bodyGrp.matrixWorld);
       const hp = _tv2.set(hands[i][0], hands[i][1], hands[i][2]);
       const arm = this.arms[i];
       arm.position.copy(shoulder).add(hp).multiplyScalar(0.5);
@@ -1597,6 +1636,7 @@ class Doll {
     this.airTime = 0;
     this.prevVy = 0;
     this.armPhase = 0;
+    this.staggerUntil = 0;
     this.input = { x: 0, z: 0, j: 0, gl: 0, gr: 0, ap: 0 };
 
     const grp = playerGroup(colorIdx);
@@ -1740,7 +1780,13 @@ class Doll {
 
     // 着地: 音＋「高速落下→着地」で0.5-1.0秒ラグドール脱力（入力無効・倒れる）→起き上がり
     if (grounded) {
-      if (this.airTime > 0.28) this.hitSound('land');
+      if (this.airTime > 0.28) {
+        this.hitSound('land');
+        // 着地のよろけ: 1歩ぶんふらつく（姿勢バネを一時的によわめ＋軽くぐらつかせる）
+        this.staggerUntil = simT + 0.35;
+        torso.angularVelocity.x += (Math.random() - 0.5) * 1.8;
+        torso.angularVelocity.z += (Math.random() - 0.5) * 1.8;
+      }
       if (this.prevVy < -HARD_FALL_V && this.airTime > 0.25) {
         this.limpUntil = Math.max(this.limpUntil, simT + LIMP_TIME);
         // ばたっと倒れるよう軽くランダムに回す
@@ -1762,11 +1808,13 @@ class Doll {
     if (!limp) {
       // ── バランス（起き上がりトルク・ばね式でふにゃっとする）
       //    ジャンプ・落下中は30-50%に減衰して「脱力して飛ぶ」
-      const posture = (grounded || hanging) ? 1 : AIR_POSTURE;
+      let posture = (grounded || hanging) ? 1 : AIR_POSTURE;
+      if (simT < this.staggerUntil) posture *= 0.45;   // 着地よろけ中はさらに頼りなく
       const bodyUp = torso.quaternion.vmult(new CANNON.Vec3(0, 1, 0));
       const axis = bodyUp.cross(new CANNON.Vec3(0, 1, 0));
-      torso.torque.x += (axis.x * 150 - torso.angularVelocity.x * 14) * posture;
-      torso.torque.z += (axis.z * 150 - torso.angularVelocity.z * 14) * posture;
+      // ばねは柔らかめ（wobbly mess）: ゆらゆらするが平地で転ばない範囲
+      torso.torque.x += (axis.x * 115 - torso.angularVelocity.x * 10.5) * posture;
+      torso.torque.z += (axis.z * 115 - torso.angularVelocity.z * 10.5) * posture;
 
       // ── 移動は速度ブレンド方式（力だと摩擦との偶力で倒れてしまう）
       //    加速はゆっくり（最高速まで~0.5秒）・旋回ももっさり
@@ -1814,7 +1862,7 @@ class Doll {
     // つかんでいない手は歩行にあわせて前後スイング（物理バネなので遅れ・オーバーシュートが出る）
     const hsp = Math.hypot(torso.velocity.x, torso.velocity.z);
     this.armPhase += hsp * FIXED_DT * 3.4;
-    const swing = Math.min(1, hsp / WALK_SPEED) * 0.26;
+    const swing = Math.min(1, hsp / WALK_SPEED) * 0.4;   // 歩行スイング大きめ
 
     for (const s of this.sides) {
       const hand = s.body;
@@ -1828,8 +1876,8 @@ class Doll {
         local = new CANNON.Vec3(0.42 * s.sx, -0.08, 0.05 + Math.sin(ph) * swing); // 体のよこ＋歩行スイング
       }
       const target = torso.pointToWorldFrame(local, new CANNON.Vec3());
-      // 脱力中はうでもだらんとする（バネよわめ・重力補償なし）
-      const K = limp ? 6 : 30, D = limp ? 1.5 : 3.2;
+      // 脱力中はうでもだらんとする。通常時もバネ柔らかめ＝大きく遅れて揺れる腕
+      const K = limp ? 6 : (grab ? 26 : 17), D = limp ? 1.5 : (grab ? 2.8 : 1.6);
       hand.force.x += (target.x - hand.position.x) * K - hand.velocity.x * D;
       hand.force.y += (target.y - hand.position.y) * K - hand.velocity.y * D - (limp ? 0 : GRAVITY * hand.mass);
       hand.force.z += (target.z - hand.position.z) * K - hand.velocity.z * D;
@@ -1925,7 +1973,7 @@ class Doll {
    ===================================================================== */
 const keys = new Set();
 let jumpCount = 0;
-let mouseGrabL = false, mouseGrabR = false, keyGrab = false, touchGrab = false;
+let mouseGrabL = false, mouseGrabR = false, keyGrab = false, touchGrabL = false, touchGrabR = false;
 // カメラ: camPitch はカメラの高さ角（＋＝上から見下ろし）。視線ピッチは -camPitch
 const PITCH_MIN = -1.22, PITCH_MAX = 1.05;   // 見上げ+70° 〜 見下ろし-60°
 let camYaw = Math.PI, camPitch = 0.22, camDist = 4.2;
@@ -2012,27 +2060,40 @@ function stickEnd(e) {
 stickEl.addEventListener('pointerup', stickEnd);
 stickEl.addEventListener('pointercancel', stickEnd);
 
-// タッチボタン。✊は押しっぱなし=両手つかみ＋押したまま上下ドラッグ=うでの高さ
-const tJump = $('t-jump'), tGrab = $('t-grab');
+// タッチボタン。✊は左右2ボタン（左右の手を独立操作・まんなか押し or 両方タッチ=両手）。
+// どのボタンも押したまま上下ドラッグ=うでの高さ（左右共通のオフセット）
+const tJump = $('t-jump');
+const grabPair = $('t-grab-pair'), tGrabL = $('t-grab-l'), tGrabR = $('t-grab-r');
 tJump.addEventListener('pointerdown', (e) => { e.preventDefault(); jumpCount++; Sound.play('jump'); });
-let grabDragId = null, grabDragY = 0;
-tGrab.addEventListener('pointerdown', (e) => {
+const grabPtrs = new Map();   // pointerId → {l, r, y0}
+function refreshTouchGrab() {
+  let l = false, r = false;
+  for (const g of grabPtrs.values()) { l = l || g.l; r = r || g.r; }
+  if ((l && !touchGrabL) || (r && !touchGrabR)) Sound.play('grab');
+  touchGrabL = l;
+  touchGrabR = r;
+  tGrabL.classList.toggle('on', l);
+  tGrabR.classList.toggle('on', r);
+  if (!l && !r) touchArmOff = 0;
+}
+grabPair.addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  touchGrab = true;
-  tGrab.classList.add('on');
-  Sound.play('grab');
-  grabDragId = e.pointerId;
-  grabDragY = e.clientY;
-  try { tGrab.setPointerCapture(e.pointerId); } catch (err) { /* 非対応でもOK */ }
+  const rect = grabPair.getBoundingClientRect();
+  const fx = (e.clientX - rect.left) / Math.max(1, rect.width);
+  // 左よりの押し=左手 / 右より=右手 / まんなかのつなぎ目=両手（親指1本で両方おせる）
+  grabPtrs.set(e.pointerId, { l: fx < 0.56, r: fx > 0.44, y0: e.clientY });
+  try { grabPair.setPointerCapture(e.pointerId); } catch (err) { /* 非対応でもOK */ }
+  refreshTouchGrab();
 });
-tGrab.addEventListener('pointermove', (e) => {
-  if (e.pointerId !== grabDragId) return;
+grabPair.addEventListener('pointermove', (e) => {
+  const g = grabPtrs.get(e.pointerId);
+  if (!g) return;
   // 上へドラッグ＝うでを上げる / 下へドラッグ＝下げる（カメラピッチとは独立のオフセット）
-  touchArmOff = Math.min(1.7, Math.max(-0.9, (grabDragY - e.clientY) / 90));
+  touchArmOff = Math.min(1.7, Math.max(-0.9, (g.y0 - e.clientY) / 90));
 });
-const grabOff = () => { touchGrab = false; touchArmOff = 0; grabDragId = null; tGrab.classList.remove('on'); };
-tGrab.addEventListener('pointerup', grabOff);
-tGrab.addEventListener('pointercancel', grabOff);
+const grabPtrEnd = (e) => { if (grabPtrs.delete(e.pointerId)) refreshTouchGrab(); };
+grabPair.addEventListener('pointerup', grabPtrEnd);
+grabPair.addEventListener('pointercancel', grabPtrEnd);
 
 if ('ontouchstart' in window) touchEl.classList.remove('hidden');
 
@@ -2066,11 +2127,10 @@ function localInput() {
   let z = fz * iy + rz * ix;
   const len = Math.hypot(x, z);
   if (len > 1) { x /= len; z /= len; }
-  const both = keyGrab || touchGrab;
   return {
     x: r2(x), z: r2(z), j: jumpCount,
-    gl: (mouseGrabL || both) ? 1 : 0,   // 左手
-    gr: (mouseGrabR || both) ? 1 : 0,   // 右手
+    gl: (mouseGrabL || keyGrab || touchGrabL) ? 1 : 0,   // 左手（Shift=両手）
+    gr: (mouseGrabR || keyGrab || touchGrabR) ? 1 : 0,   // 右手
     ap: r2(-camPitch + touchArmOff),    // 視線ピッチ(+上)＋モバイルの腕オフセット → うでの高さ
   };
 }
