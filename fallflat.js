@@ -1268,7 +1268,7 @@ class Rig {
     // うで
     const hands = [hl, hr];
     for (let i = 0; i < 2; i++) {
-      const sx = i === 0 ? -1 : 1;
+      const sx = i === 0 ? 1 : -1;   // hands[0]=左手(+x)・hands[1]=右手(-x)
       const shoulder = _tv1.set(0.27 * sx, 0.3, 0).applyMatrix4(this.bodyGrp.matrixWorld);
       const hp = _tv2.set(hands[i][0], hands[i][1], hands[i][2]);
       const arm = this.arms[i];
@@ -1665,7 +1665,7 @@ class Doll {
 
     // 手×2（うではバネ＋つかみ用コンストレイント）
     this.sides = [];
-    for (const sx of [-1, 1]) {
+    for (const sx of [1, -1]) {   // sides[0]=+x=キャラの左手（背後カメラで画面左）
       const hand = new CANNON.Body({
         mass: 0.3,
         material: handMaterial,
@@ -1866,7 +1866,7 @@ class Doll {
 
     for (const s of this.sides) {
       const hand = s.body;
-      const grab = !limp && (s.sx < 0 ? inp.gl : inp.gr);
+      const grab = !limp && (s.sx > 0 ? inp.gl : inp.gr);
       s.elev += (armTarget - s.elev) * 0.14; // バネ的な遅れ
       let local;
       if (grab) {
