@@ -220,6 +220,17 @@ button, input, a { touch-action: manipulation; } /* タップは効くがダブ�
 }
 #tbtns button span { font-size: 10px; }
 #tbtns button.on { background: #ffe08a; }
+/* ✊クラスタ: 上に「✊✊りょうて」・下に左右ペア（すべてトグル式・親指到達圏） */
+#t-grab-cluster {
+  display: flex; flex-direction: column; gap: 6px; align-items: stretch;
+  pointer-events: auto; touch-action: none;
+}
+#t-grab-cluster > #t-grab-b {
+  width: 124px; height: 44px;
+  border-radius: 16px;
+  font-size: 16px;
+  flex-direction: row; gap: 6px;
+}
 /* ✊左右ペア: 親指1本でとなり合わせに押せる近さ（すきま4px・まんなか押し=両手） */
 #t-grab-pair {
   display: flex; gap: 4px; align-items: flex-end;

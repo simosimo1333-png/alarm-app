@@ -56,7 +56,7 @@
       </div>
       <p class="help">
         🖥️ クリックでマウス視点ON（Escで解除）・ WASD / 矢印 = 移動 ・ スペース = ジャンプ ・ 左クリック = 左手 / 右クリック = 右手 / Shift か 両ボタン = 両手 ・ 上をみると うでが上がる ・ R = もどる<br />
-        📱 左スティック = 移動 ・ ⬆ = ジャンプ ・ ✊ひだり / ✊みぎ = 左右の手でつかむ（まんなか押し や 2本タッチ = 両手・おしたまま上下ドラッグで うでの高さ）・ 画面スワイプ = カメラ<br />
+        📱 左スティック = 移動 ・ ⬆ = ジャンプ ・ ✊は タップで つかむ / もういちどタップで はなす（✊✊ = 両手まとめて・触れたまま上下ドラッグで うでの高さ）・ 画面スワイプ = カメラ<br />
         🧗 上をみて つかむ → 下をみながら 前へすすむと 体がもちあがる！ ・ 高いところから落ちると しばらく のびちゃう ・ 落ちたら 空から降ってやりなおし
       </p>
       <p class="help"><a href="index.html">🎮 ゲームをえらぶ</a></p>
@@ -66,9 +66,12 @@
     <div id="touch" class="hidden">
       <div id="stick"><div id="stick-knob"></div></div>
       <div id="tbtns">
-        <div id="t-grab-pair">
-          <button id="t-grab-l">✊<span>ひだり</span></button>
-          <button id="t-grab-r">✊<span>みぎ</span></button>
+        <div id="t-grab-cluster">
+          <button id="t-grab-b">✊✊<span>りょうて</span></button>
+          <div id="t-grab-pair">
+            <button id="t-grab-l">✊<span>ひだり</span></button>
+            <button id="t-grab-r">✊<span>みぎ</span></button>
+          </div>
         </div>
         <button id="t-jump">⬆<span>ジャンプ</span></button>
       </div>

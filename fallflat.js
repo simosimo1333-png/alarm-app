@@ -22,6 +22,8 @@ const AIR_POSTURE = 0.4;         // ジャンプ・落下中の姿勢維持は30
 const HARD_FALL_V = 7.5;         // これより速く落ちて着地→ラグドール脱力
 const LIMP_TIME = 0.8;           // 着地脱力の長さ（0.5〜1.0秒）
 const ARM_LEN = 0.72;            // うでの長さ（つかみ時のリーチ）
+const HAND_REACH = 0.95;         // 手球が肩からはなれられる物理上限（ソフトリミット）
+const ARM_VIS_MAX = 1.25;        // 見た目の腕の最大長（これ以上は伸びない）
 const OFF_WHITE = 0xf2f0eb;      // キャラの基本色（オフホワイト）
 const FALL_Y = -8;               // 物がこれよりしずんだら持ち場へもどる
 const WATER_Y = -3.5;            // 海面の高さ（見た目のはいけい）
@@ -704,6 +706,9 @@ function buildCourse1() {
   staticBox(0.55, 0.35, 0.55, 5.5, 0.17, 46.5, MAT.red);         // 花だん
   staticBox(0.55, 0.35, 0.55, 6.6, 0.17, 47.4, MAT.blue);
   staticBox(0.55, 0.35, 0.55, 5.9, 0.17, 48.6, MAT.gold);
+  // よじ登り①: にわの塀（1.45m）。ジャンプではとどかない＝掴んでのぼる練習
+  staticBox(18, 1.45, 0.5, 0, 0.725, 56, MAT.brick);
+  staticBox(18.2, 0.12, 0.62, 0, 1.51, 56, MAT.plaster);         // 塀の笠石
 
   // ── ⑦ まとあて: 箱をなげて 高いボタンにあてると 生けがきの門がひらく ──
   wallZ(62, -9, 9, 0, 2.6, MAT.leaf, [{ x0: -1.1, x1: 1.1, y0: 0, y1: 2.25 }], 0.6);
@@ -718,14 +723,17 @@ function buildCourse1() {
     { angularDamping: 0.55 });
   islandBox(14, 8, 0, 0, 75);                                    // 果樹園の島（z71..79）
   tree(-4.5, 73, 0, 1.2); tree(4.2, 76.5, 0, 1.05); tree(0.5, 77.5, 0, 0.8);
+  // よじ登り②: 果樹園の石垣（1.45m・島のはば全体）
+  staticBox(14, 1.45, 0.6, 0, 0.725, 74.6, MAT.stoneDark);
 
   // ── ⑨ ゆれるつり橋（z79..87） ──
   hangingBridge(0, 0.0, 79, 87, 2.4, 5, MAT.wood);
   islandBox(12, 8, 0, 0, 91);                                    // にわのテラス（z87..95）
-  banner(-4.5, 0, 89, MAT.red); tree(4.6, 92.5, 0, 1.0);
+  banner(-4.5, 0, 89, MAT.red); tree(4.6, 89.3, 0, 1.0);
+  // よじ登り③: テラスの高台（1.5m）。のぼった先からターザンへ
+  staticBox(12, 1.5, 4, 0, 0.75, 93, MAT.grass);
 
-  // ── ⑩ くさりターザンで大ジャンプ（z95..99.5） ──
-  staticBox(1.6, 0.3, 1.2, 0, 0.15, 94.3, MAT.wood);             // ふみ切り台
+  // ── ⑩ くさりターザンで大ジャンプ（z95..99.5・高台からとびつく） ──
   staticBox(0.5, 8, 0.5, -2.6, 3, 97.2, MAT.woodDark);           // やぐら
   staticBox(0.5, 8, 0.5, 2.6, 3, 97.2, MAT.woodDark);
   staticBox(5.6, 0.4, 0.5, 0, 6.8, 97.2, MAT.woodDark);
@@ -761,7 +769,7 @@ function buildCourse1() {
     { cp: 3, x0: 0.5, x1: 5.3, z0: 31, z1: 36, yMin: 1.6 },
     { cp: 4, x0: -8, x1: 8, z0: 44.5, z1: 48.5, yMin: -0.5 },
     { cp: 5, x0: -2.5, x1: 2.5, z0: 62.4, z1: 64, yMin: -0.5 },
-    { cp: 6, x0: -7, x1: 7, z0: 71.2, z1: 74.5, yMin: -0.5 },
+    { cp: 6, x0: -7, x1: 7, z0: 71.2, z1: 74.2, yMin: -0.5 },
     { cp: 7, x0: -6, x1: 6, z0: 87.2, z1: 90.5, yMin: -0.5 },
     { cp: 8, x0: -5, x1: 5, z0: 99.6, z1: 102, yMin: -0.5 },
   ];
@@ -799,8 +807,11 @@ function buildCourse2() {
     staticBox(0.45, 7, 0.45, cx, -0.9, cz, MAT.ironDark);        // 柱（虚空へのびる）
   }
   staticBox(7.3, 0.28, 0.28, 0, 3.15, 12.2, MAT.hazard);          // ふちの黄しま
-  trafficCone(2.6, 15, 3.0); trafficCone(-2.7, 22, 3.0);
-  staticBox(0.5, 2.2, 3.2, -3.1, 4.1, 17, MAT.orange);            // 鉄骨のたば（かざり）
+  trafficCone(2.6, 15, 3.0); trafficCone(-2.7, 23.2, 3.0);
+  staticBox(0.5, 0.55, 3.2, -3.1, 3.28, 17, MAT.orange);          // よこづみの鉄骨（かざり）
+  // よじ登り①: 資材コンテナのかべ（1.5m・デッキのはば全体）
+  staticBox(3.5, 1.5, 2.4, -1.75, 3.75, 21, MAT.orange);
+  staticBox(3.5, 1.5, 2.4, 1.75, 3.75, 21, MAT.blue);
 
   // ── ② 鉄球（レッキングボール）: くさりにとびついてスイング（z26..30.5のすきま） ──
   staticBox(0.55, 12, 0.55, 3.9, 2.5, 28.25, MAT.hazard);         // クレーンのマスト
@@ -890,7 +901,10 @@ function buildCourse2() {
   staticBox(0.45, 21, 0.45, -3, -0.2, 86.5, MAT.ironDark);
   staticBox(0.45, 21, 0.45, 3, -0.2, 86.5, MAT.ironDark);
   trafficCone(2.6, 80, 10.2);
-  staticBox(0.5, 2.2, 3.0, 3.0, 11.3, 84, MAT.orange);           // 鉄骨のたば（かざり）
+  staticBox(0.5, 0.5, 3.0, 3.0, 10.45, 80, MAT.orange);          // よこづみの鉄骨（かざり）
+  // よじ登り②: 高層フロアのコンテナごえ（1.5m）
+  staticBox(3.5, 1.5, 2.4, -1.75, 10.95, 83.4, MAT.blue);
+  staticBox(3.5, 1.5, 2.4, 1.75, 10.95, 83.4, MAT.orange);
 
   // ── ⑧ ゆれる鉄骨をよけながら せまい梁をわたる（z87.6..93.8） ──
   staticBox(0.5, 0.25, 6.2, 0, 10.07, 90.7, MAT.orange);         // せまい梁
@@ -914,7 +928,9 @@ function buildCourse2() {
   staticBox(0.4, 4, 0.4, 3, 12.3, 114.5, MAT.orange);
   staticBox(6.4, 0.35, 0.4, 0, 14.3, 114.5, MAT.orange);
   trafficCone(-2.4, 111, 10.2);
-  goalFlag(0, 10.2, 113.4);
+  // よじ登り③: ゴールの高台（1.5m）。旗はこのうえ
+  staticBox(7, 1.5, 4, 0, 10.95, 113.4, MAT.concrete);
+  goalFlag(0, 11.7, 113.4);
   isletDeco(22, 9, 112);
 
   CHECKPOINTS = [
@@ -925,6 +941,7 @@ function buildCourse2() {
     { x: 0, y: 7.2, z: 72.8 },      // バランス梁のあとの休けいデッキ
     { x: 0, y: 11.1, z: 79.5 },     // 高層フロア
     { x: 0, y: 11.1, z: 95.2 },     // ゆれる鉄骨のあと
+    { x: 0, y: 11.1, z: 110.3 },    // ゴール高台のまえ
   ];
   CP_ZONES = [
     { cp: 1, x0: -3.5, x1: 3.5, z0: 12, z1: 16, yMin: 2.5 },
@@ -933,8 +950,9 @@ function buildCourse2() {
     { cp: 4, x0: -2.75, x1: 2.75, z0: 71, z1: 75, yMin: 5.8 },
     { cp: 5, x0: -3.5, x1: 3.5, z0: 77.6, z1: 81, yMin: 9.7 },
     { cp: 6, x0: -3.5, x1: 3.5, z0: 93.8, z1: 96.5, yMin: 9.7 },
+    { cp: 7, x0: -3.5, x1: 3.5, z0: 109.4, z1: 111.2, yMin: 9.7 },
   ];
-  GOAL = { x0: -3.5, x1: 3.5, z0: 110.4, y: 9.6 };
+  GOAL = { x0: -3.5, x1: 3.5, z0: 111.6, y: 11.1 };
 }
 
 /* =====================================================================
@@ -959,6 +977,11 @@ function buildCourse3() {
   // ── 前庭（z13..27） ──
   islandBox(16, 14, 0, 0, 20, MAT.grass);
   tree(6.6, 14.5, 0, 1.0); banner(6.8, 0, 19, MAT.red);
+  // よじ登り①: くずれた城壁あと（1.5m・島のはば全体）
+  staticBox(16, 1.5, 0.9, 0, 0.75, 17.5, MAT.stoneDark);
+  staticBox(1.1, 0.45, 0.75, -5.2, 1.72, 17.5, MAT.stone);       // くずれのこり
+  staticBox(1.8, 0.3, 0.75, 3.4, 1.65, 17.5, MAT.stone);
+  staticBox(0.9, 0.4, 0.9, 1.2, 0.2, 18.6, MAT.stone);           // くずれた石（かざり）
 
   // ── ② カタパルト: おもりをのせると発射！じぶんをはねばしへ飛ばす ──
   staticBox(0.4, 1.3, 0.4, -3.3, 0.65, 21, MAT.woodDark);         // 台
@@ -1086,7 +1109,11 @@ function buildCourse3() {
     null, MAT.ironDark);
   dynBox(0.72, 0.72, 0.72, -3.2, 4.75, 95, MAT.crate, 12, { noSleep: true });
   dynBox(0.72, 0.72, 0.72, -4, 4.75, 95.9, MAT.crate, 12, { noSleep: true });
-  tree(5.5, 103, 4.2, 0.9); banner(-6, 4.2, 104, MAT.blue);
+  tree(5.5, 101, 4.2, 0.9);
+  // よじ登り②: くずれた基壇の二段のぼり（1.4m→1.3mの連続。おりた先がはねばし2）
+  staticBox(18, 1.4, 3.2, 0, 4.9, 104.6, MAT.stone);             // 一段め（上面5.6）
+  staticBox(18, 1.3, 1.6, 0, 6.25, 105.4, MAT.stone);            // 二段め（上面6.9）
+  banner(-6, 6.9, 105.4, MAT.blue);
 
   // ── ⑧ さいごのはねばし（堀 z107.4..112.2）: くさりをつかんでひきおろす ──
   islandBox(1.4, 1.4, 0.9, 4.1, 110);                            // 堀のとび石
@@ -1097,7 +1124,11 @@ function buildCourse3() {
 
   // ── ⑨ 大聖塔の島: 階段の正攻法＋かべのぼりの力技 ──
   islandBox(16, 16, 0, 4.2, 120.4, MAT.grass);                   // z112.4..128.4
-  banner(-5, 4.2, 114, MAT.red); banner(5, 4.2, 114, MAT.blue);
+  banner(-5, 4.2, 113.2, MAT.red); banner(5, 4.2, 113.2, MAT.blue);
+  // よじ登り③: 大聖塔まえのくずれた城壁（1.5m・島のはば全体）
+  staticBox(16, 1.5, 0.8, 0, 4.95, 114.4, MAT.stoneDark);
+  staticBox(1.4, 0.4, 0.7, 4.6, 5.9, 114.4, MAT.stone);          // くずれのこり
+  staticBox(1.0, 0.35, 0.9, -2.2, 4.38, 115.3, MAT.stone);       // くずれた石
   tree(-6, 118, 4.2, 1.0); tree(6.2, 124, 4.2, 0.9);
   staticBox(6.5, 6, 6.5, 0, 7.2, 122.4, MAT.stone);              // 大聖塔（上面10.2）
   stairs(8, 0.5, 0.6, 2.2, MAT.stone, -6.4, 4.2, 115.4, 'x', 1); // 階段その1（y4.2→8.2）
@@ -1136,7 +1167,7 @@ function buildCourse3() {
     { cp: 6, x0: -2, x1: 2, z0: 70.5, z1: 74.5, yMin: 4.0 },
     { cp: 7, x0: -2, x1: 2, z0: 81.5, z1: 85.2, yMin: 4.0 },
     { cp: 8, x0: -3, x1: 3, z0: 98.8, z1: 102, yMin: 3.7 },
-    { cp: 9, x0: -6, x1: 6, z0: 112.5, z1: 116, yMin: 3.7 },
+    { cp: 9, x0: -6, x1: 6, z0: 112.5, z1: 114.0, yMin: 3.7 },
   ];
   GOAL = { x0: -3.3, x1: 3.3, z0: 119.4, y: 9.6 };
 }
@@ -1514,11 +1545,17 @@ class Rig {
       const shoulder = _tv1.set(0.27 * sx, 0.3, 0).applyMatrix4(this.bodyGrp.matrixWorld);
       const hp = _tv2.set(hands[i][0], hands[i][1], hands[i][2]);
       const arm = this.arms[i];
-      arm.position.copy(shoulder).add(hp).multiplyScalar(0.5);
       const dir = _tv3.copy(hp).sub(shoulder);
-      const len = Math.max(0.08, dir.length());
+      let len = Math.max(0.08, dir.length());
+      dir.normalize();
+      // 見た目の腕の長さに上限（物理ソフトリミットの保険。超えたら手も腕の先へ寄せる）
+      if (len > ARM_VIS_MAX) {
+        len = ARM_VIS_MAX;
+        hp.copy(shoulder).addScaledVector(dir, len);
+      }
       arm.scale.set(1, len, 1);
-      arm.quaternion.setFromUnitVectors(UP, dir.normalize());
+      arm.quaternion.setFromUnitVectors(UP, dir);
+      arm.position.copy(shoulder).addScaledVector(dir, len / 2);
       this.hands[i].position.copy(hp);
       this.handMats[i].color.setHex((grabMask >> i) & 1 ? 0xffd43b : OFF_WHITE);
     }
@@ -2208,6 +2245,31 @@ class Doll {
         }
       }
 
+      // ── 伸びすぎ防止のソフトリミット: 非つかみ手が肩から HAND_REACH を超えたら
+      //    超過分だけ引きもどす（急旋回・落下で腕がゴムのように伸びるのを防ぐ。
+      //    リミット内の遅れ・揺れはそのまま＝ふにゃふにゃ感は殺さない）
+      if (!s.grabC) {
+        const sh = torso.pointToWorldFrame(new CANNON.Vec3(0.27 * s.sx, 0.3, 0), new CANNON.Vec3());
+        const ox = hand.position.x - sh.x, oy = hand.position.y - sh.y, oz = hand.position.z - sh.z;
+        const dist = Math.hypot(ox, oy, oz);
+        if (dist > HAND_REACH) {
+          const nx = ox / dist, ny = oy / dist, nz = oz / dist;
+          const back = (dist - HAND_REACH) * 0.7;   // 超過分の7割をその場で引きもどす
+          hand.position.x -= nx * back;
+          hand.position.y -= ny * back;
+          hand.position.z -= nz * back;
+          // 胴体より外向きに逃げる速度成分は打ち消す（手は軽いので反動は無視できる）
+          const vr = (hand.velocity.x - torso.velocity.x) * nx
+            + (hand.velocity.y - torso.velocity.y) * ny
+            + (hand.velocity.z - torso.velocity.z) * nz;
+          if (vr > 0) {
+            hand.velocity.x -= nx * vr;
+            hand.velocity.y -= ny * vr;
+            hand.velocity.z -= nz * vr;
+          }
+        }
+      }
+
       // ── つかむ / はなす（手ごとに独立 → 片手ずつ掛け替えて登れる）
       if (grab) {
         if (!s.grabC && simT > s.cool) this.tryGrab(s);
@@ -2366,40 +2428,65 @@ function stickEnd(e) {
 stickEl.addEventListener('pointerup', stickEnd);
 stickEl.addEventListener('pointercancel', stickEnd);
 
-// タッチボタン。✊は左右2ボタン（左右の手を独立操作・まんなか押し or 両方タッチ=両手）。
-// どのボタンも押したまま上下ドラッグ=うでの高さ（左右共通のオフセット）
+// タッチボタン。✊はトグル式: タップでつかむ→もういちどタップではなす。
+// ✊✊りょうて=両手を一括オン/オフ。左右ペアのまんなか押しも両手あつかい。
+// どのボタンも触れたまま上下ドラッグ=うでの高さ（ドラッグしてもトグルは解除されない）
 const tJump = $('t-jump');
-const grabPair = $('t-grab-pair'), tGrabL = $('t-grab-l'), tGrabR = $('t-grab-r');
+const grabPair = $('t-grab-pair'), tGrabL = $('t-grab-l'), tGrabR = $('t-grab-r'), tGrabB = $('t-grab-b');
 tJump.addEventListener('pointerdown', (e) => { e.preventDefault(); jumpCount++; Sound.play('jump'); });
-const grabPtrs = new Map();   // pointerId → {l, r, y0}
-function refreshTouchGrab() {
-  let l = false, r = false;
-  for (const g of grabPtrs.values()) { l = l || g.l; r = r || g.r; }
-  if ((l && !touchGrabL) || (r && !touchGrabR)) Sound.play('grab');
-  touchGrabL = l;
-  touchGrabR = r;
-  tGrabL.classList.toggle('on', l);
-  tGrabR.classList.toggle('on', r);
-  if (!l && !r) touchArmOff = 0;
+const grabPtrs = new Map();   // pointerId → {l, r, wasOff, x0, y0, moved}
+function syncGrabButtons() {
+  tGrabL.classList.toggle('on', touchGrabL);
+  tGrabR.classList.toggle('on', touchGrabR);
+  tGrabB.classList.toggle('on', touchGrabL && touchGrabR);
+}
+function setTouchGrab(l, r, on) {
+  if (l) touchGrabL = on;
+  if (r) touchGrabR = on;
+  syncGrabButtons();
+}
+// リスポーン・脱力などの強制解除でトグルとハイライトを確実にもどす
+function clearTouchGrabs() {
+  if (!touchGrabL && !touchGrabR) return;
+  touchGrabL = touchGrabR = false;
+  touchArmOff = 0;
+  syncGrabButtons();
+}
+function grabPointerDown(e, l, r) {
+  e.preventDefault();
+  // 対象の手がすでにオンなら「はなすためのタップ」候補（ドラッグなら離さない）
+  const wasOff = !((l && touchGrabL) || (r && touchGrabR));
+  if (wasOff) { setTouchGrab(l, r, true); Sound.play('grab'); }
+  grabPtrs.set(e.pointerId, { l, r, wasOff, x0: e.clientX, y0: e.clientY, moved: 0 });
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* 非対応でもOK */ }
 }
 grabPair.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
   const rect = grabPair.getBoundingClientRect();
   const fx = (e.clientX - rect.left) / Math.max(1, rect.width);
   // 左よりの押し=左手 / 右より=右手 / まんなかのつなぎ目=両手（親指1本で両方おせる）
-  grabPtrs.set(e.pointerId, { l: fx < 0.56, r: fx > 0.44, y0: e.clientY });
-  try { grabPair.setPointerCapture(e.pointerId); } catch (err) { /* 非対応でもOK */ }
-  refreshTouchGrab();
+  grabPointerDown(e, fx < 0.56, fx > 0.44);
 });
-grabPair.addEventListener('pointermove', (e) => {
+tGrabB.addEventListener('pointerdown', (e) => grabPointerDown(e, true, true));
+const grabPointerMove = (e) => {
   const g = grabPtrs.get(e.pointerId);
   if (!g) return;
+  g.moved = Math.max(g.moved, Math.hypot(e.clientX - g.x0, e.clientY - g.y0));
   // 上へドラッグ＝うでを上げる / 下へドラッグ＝下げる（カメラピッチとは独立のオフセット）
   touchArmOff = Math.min(1.7, Math.max(-0.9, (g.y0 - e.clientY) / 90));
-});
-const grabPtrEnd = (e) => { if (grabPtrs.delete(e.pointerId)) refreshTouchGrab(); };
-grabPair.addEventListener('pointerup', grabPtrEnd);
-grabPair.addEventListener('pointercancel', grabPtrEnd);
+};
+const grabPointerEnd = (e) => {
+  const g = grabPtrs.get(e.pointerId);
+  if (!g) return;
+  grabPtrs.delete(e.pointerId);
+  // すでにオンだった手を（ドラッグせず）タップした → はなす
+  if (!g.wasOff && g.moved < 14) setTouchGrab(g.l, g.r, false);
+  if (grabPtrs.size === 0) touchArmOff = 0; // 高さオフセットだけリセット（つかみは保持）
+};
+for (const el of [grabPair, tGrabB]) {
+  el.addEventListener('pointermove', grabPointerMove);
+  el.addEventListener('pointerup', grabPointerEnd);
+  el.addEventListener('pointercancel', grabPointerEnd);
+}
 
 if ('ontouchstart' in window) touchEl.classList.remove('hidden');
 
@@ -2599,6 +2686,7 @@ function enterPlay() {
 
 function requestRespawn() {
   if (state !== 'play') return;
+  clearTouchGrabs();   // リスポーンでモバイルのつかみトグルも解除
   if (isHost) { const d = dolls.get(myId); if (d) d.respawn(); }
   else if (hostConn) hostConn.send({ t: 'rs' });
 }
@@ -2854,12 +2942,14 @@ function hostStep(dt, now) {
   for (const [id, doll] of dolls) {
     const rig = rigs.get(id);
     if (!rig) continue;
+    const limpNow = simT < doll.limpUntil;
+    if (id === myId && limpNow) clearTouchGrabs();   // 脱力＝強制はなす。トグルも解除
     const t = doll.torso;
     rig.setPose(
       t.position, t.quaternion,
       [doll.sides[0].body.position.x, doll.sides[0].body.position.y, doll.sides[0].body.position.z],
       [doll.sides[1].body.position.x, doll.sides[1].body.position.y, doll.sides[1].body.position.z],
-      (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0) | (simT < doll.limpUntil ? 4 : 0), dt,
+      (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0) | (limpNow ? 4 : 0), dt,
     );
   }
   for (const o of dynObjects) {
@@ -2911,6 +3001,7 @@ function guestStep(now) {
     const rig = rigs.get(id);
     if (!rig) continue;
     const ea = aMap.get(id) || eb;
+    if (id === myId && (eb[14] & 4)) clearTouchGrabs();   // 自分が脱力＝モバイルのつかみトグルも解除
     const px = lerp(ea[1], eb[1], t), py = lerp(ea[2], eb[2], t), pz = lerp(ea[3], eb[3], t);
     _q1.set(ea[4], ea[5], ea[6], ea[7]);
     _q2.set(eb[4], eb[5], eb[6], eb[7]);
