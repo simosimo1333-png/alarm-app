@@ -1980,6 +1980,7 @@ class Doll {
     this.prevVy = 0;
     this.armPhase = 0;
     this.staggerUntil = 0;
+    this.climbing = false;   // よじ登り補助が効いているか（前ステップの値を移動減衰に使う）
     this.input = { x: 0, z: 0, j: 0, gl: 0, gr: 0, ap: 0 };
 
     const grp = playerGroup(colorIdx);
@@ -2175,7 +2176,8 @@ class Doll {
         const s = Math.min(1, mlen);
         const tvx = gvx + (inp.x / mlen) * WALK_SPEED * s;
         const tvz = gvz + (inp.z / mlen) * WALK_SPEED * s;
-        const k = grounded ? WALK_ACCEL : AIR_ACCEL;
+        // よじ登り中の移動入力は「体をふる・縁にそって寄る」用に弱く効かせる（暴発加速させない）
+        const k = this.climbing ? AIR_ACCEL * 0.5 : (grounded ? WALK_ACCEL : AIR_ACCEL);
         torso.velocity.x += (tvx - torso.velocity.x) * k;
         torso.velocity.z += (tvz - torso.velocity.z) * k;
       } else {
@@ -2278,8 +2280,10 @@ class Doll {
       }
     }
 
-    // ── よじのぼり（本家の文法）: 上を見て掴む → 下を見ながら前進 →
-    //    胴体が拘束点（手）の方向へ引き寄せられて持ち上がる
+    // ── よじのぼり（本家式・連続の力のみ。テレポート/位置直接セットは使わない）:
+    //    上を見て掴む → 下を見ながら前進 → 引き寄せ力で体が上がる →
+    //    縁の高さに近づいたら上+前へ押し込み、ひざから縁に乗り上げる（1〜2秒の連続モーション）
+    this.climbing = false;
     if (!limp) {
       const pull = Math.min(1, Math.max(0, (0.15 - vp) / 0.85)); // 下をむくほど1（vp<0.15で効きはじめ）
       let fx, fz;
@@ -2287,42 +2291,55 @@ class Doll {
       if (ml > 0.15) { fx = inp.x / ml; fz = inp.z / ml; }
       else { const f = torso.quaternion.vmult(new CANNON.Vec3(0, 0, 1)); fx = f.x; fz = f.z; }
       const fwdBoost = ml > 0.15 ? 1 : 0.45; // 前進入力で引きあげが強まる
-      let mantle = null;
       for (const s of this.sides) {
         if (!s.grabC || !s.holdC) continue;
         // 動的オブジェクト（木箱・岩・他プレイヤーなど）を掴んでいるあいだは
         // よじのぼり補助をかけない（箱を動かすときに体が箱へ引っ張られてガクつくのを防ぐ）。
-        // 補助（引き寄せ力・ホールド短縮・乗りこえ）は静的な壁・かべ・キネマティック床のみ
+        // 補助（引き寄せ力・ホールド調整・乗り上げ）は静的な壁・キネマティック床のみ
         const held = s.grabC.bodyB;
         if (held.type === CANNON.Body.DYNAMIC) continue;
         const hp = s.body.position;
         const hy = hp.y;
-        if (hy > torso.position.y - 0.05) {          // 手が体と同じ高さ以上＝つかまっている
-          // ホールド距離: 下をむくほど短く＝体が手にひきよせられる
-          const targetDist = 0.72 - pull * fwdBoost * 0.5; // 0.72(ぶらさがり)〜0.22(ひきあげ)
-          s.holdC.distance += (targetDist - s.holdC.distance) * 0.3;
-          if (pull > 0.05 && torso.velocity.y < 3.0) {
-            // 胴体を拘束点方向へ引き寄せる力（重力に打ち勝つ・速度制限つき）
+        if (hy > torso.position.y - 0.75) {          // つかまり中〜乗り上げ中（体が手+0.75上まで）
+          this.climbing = true;
+          const rise = torso.position.y - hy;                    // 縁(手)にたいする体の高さ
+          const vault = pull > 0.4 && ml > 0.15 && rise > -0.45; // 乗り上げフェーズ
+          if (vault) {
+            // 乗り上げ中はホールドをゆるめ、体が手より上へ抜けられるようにする
+            s.holdC.distance += (0.8 - s.holdC.distance) * 0.25;
+          } else {
+            // ホールド距離: 下をむくほど短く＝体が手にひきよせられる
+            const targetDist = 0.72 - pull * fwdBoost * 0.5;     // 0.72(ぶらさがり)〜0.22(ひきあげ)
+            s.holdC.distance += (targetDist - s.holdC.distance) * 0.3;
+          }
+          if (pull > 0.05 && torso.velocity.y < 3.0 && rise < 0.1) {
+            // 胴体を拘束点方向へ引き寄せる連続的な力（上限クランプつき）
             const dx = hp.x - torso.position.x, dy = hy - torso.position.y, dz = hp.z - torso.position.z;
             const dl = Math.hypot(dx, dy, dz) || 1;
-            const F = torso.mass * -GRAVITY * (1.1 + 1.6 * pull * fwdBoost);
+            const F = Math.min(torso.mass * -GRAVITY * (1.1 + 1.6 * pull * fwdBoost), torso.mass * 32);
             torso.force.x += (dx / dl) * F * 0.5;
             torso.force.y += Math.max(0.25, dy / dl) * F;
             torso.force.z += (dz / dl) * F * 0.5;
           }
-          // 乗りこえ: 体を手のすぐ下まで引きあげた状態で下をむき前進 → ふちの上へ
-          if (!mantle && pull > 0.5 && ml > 0.15 && torso.position.y > hy - 0.34) {
-            mantle = { hx: hp.x, hy, hz: hp.z };
+          if (vault) {
+            // 上へ: 縁+0.6までもち上げつづける（速度上限つき→1ステップの移動は数cm＝すり抜けない）
+            if (rise < 0.6 && torso.velocity.y < 2.4) {
+              torso.force.y += torso.mass * -GRAVITY * 1.9;
+            }
+            // 前へ: 縁をこえるほど強く押し込み、ひざから乗り上げる（速度上限つき）
+            const fSpd = torso.velocity.x * fx + torso.velocity.z * fz;
+            if (fSpd < 2.2) {
+              const push = torso.mass * (7 + 11 * Math.min(1, Math.max(0, rise + 0.25)));
+              torso.force.x += fx * push;
+              torso.force.z += fz * push;
+            }
+            // のぼり切ったら手をはなす（勢いはそのまま＝連続運動で縁の上に着地）
+            if (rise > 0.45) {
+              this.releaseSide(s);
+              s.cool = simT + 0.35;
+            }
           }
         }
-      }
-      if (mantle) {
-        // つかんだふちの上（奥がわ）へ体をのせて手をはなす
-        torso.position.set(mantle.hx + fx * 1.1, mantle.hy + 0.72, mantle.hz + fz * 1.1);
-        torso.velocity.set(fx * 1.6, 0.4, fz * 1.6);
-        torso.angularVelocity.set(0, 0, 0);
-        this.releaseGrabs();
-        for (const s of this.sides) s.cool = simT + 0.4;   // すぐ再グラブしない
       }
     }
 
