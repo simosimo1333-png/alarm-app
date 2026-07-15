@@ -22,6 +22,8 @@ const AIR_POSTURE = 0.4;         // ジャンプ・落下中の姿勢維持は30
 const HARD_FALL_V = 7.5;         // これより速く落ちて着地→ラグドール脱力
 const LIMP_TIME = 0.8;           // 着地脱力の長さ（0.5〜1.0秒）
 const ARM_LEN = 0.72;            // うでの長さ（つかみ時のリーチ）
+const HAND_REACH = 0.95;         // 手球が肩からはなれられる物理上限（ソフトリミット）
+const ARM_VIS_MAX = 1.25;        // 見た目の腕の最大長（これ以上は伸びない）
 const OFF_WHITE = 0xf2f0eb;      // キャラの基本色（オフホワイト）
 const FALL_Y = -8;               // 物がこれよりしずんだら持ち場へもどる
 const WATER_Y = -3.5;            // 海面の高さ（見た目のはいけい）
@@ -1514,11 +1516,17 @@ class Rig {
       const shoulder = _tv1.set(0.27 * sx, 0.3, 0).applyMatrix4(this.bodyGrp.matrixWorld);
       const hp = _tv2.set(hands[i][0], hands[i][1], hands[i][2]);
       const arm = this.arms[i];
-      arm.position.copy(shoulder).add(hp).multiplyScalar(0.5);
       const dir = _tv3.copy(hp).sub(shoulder);
-      const len = Math.max(0.08, dir.length());
+      let len = Math.max(0.08, dir.length());
+      dir.normalize();
+      // 見た目の腕の長さに上限（物理ソフトリミットの保険。超えたら手も腕の先へ寄せる）
+      if (len > ARM_VIS_MAX) {
+        len = ARM_VIS_MAX;
+        hp.copy(shoulder).addScaledVector(dir, len);
+      }
       arm.scale.set(1, len, 1);
-      arm.quaternion.setFromUnitVectors(UP, dir.normalize());
+      arm.quaternion.setFromUnitVectors(UP, dir);
+      arm.position.copy(shoulder).addScaledVector(dir, len / 2);
       this.hands[i].position.copy(hp);
       this.handMats[i].color.setHex((grabMask >> i) & 1 ? 0xffd43b : OFF_WHITE);
     }
@@ -2208,6 +2216,31 @@ class Doll {
         }
       }
 
+      // ── 伸びすぎ防止のソフトリミット: 非つかみ手が肩から HAND_REACH を超えたら
+      //    超過分だけ引きもどす（急旋回・落下で腕がゴムのように伸びるのを防ぐ。
+      //    リミット内の遅れ・揺れはそのまま＝ふにゃふにゃ感は殺さない）
+      if (!s.grabC) {
+        const sh = torso.pointToWorldFrame(new CANNON.Vec3(0.27 * s.sx, 0.3, 0), new CANNON.Vec3());
+        const ox = hand.position.x - sh.x, oy = hand.position.y - sh.y, oz = hand.position.z - sh.z;
+        const dist = Math.hypot(ox, oy, oz);
+        if (dist > HAND_REACH) {
+          const nx = ox / dist, ny = oy / dist, nz = oz / dist;
+          const back = (dist - HAND_REACH) * 0.7;   // 超過分の7割をその場で引きもどす
+          hand.position.x -= nx * back;
+          hand.position.y -= ny * back;
+          hand.position.z -= nz * back;
+          // 胴体より外向きに逃げる速度成分は打ち消す（手は軽いので反動は無視できる）
+          const vr = (hand.velocity.x - torso.velocity.x) * nx
+            + (hand.velocity.y - torso.velocity.y) * ny
+            + (hand.velocity.z - torso.velocity.z) * nz;
+          if (vr > 0) {
+            hand.velocity.x -= nx * vr;
+            hand.velocity.y -= ny * vr;
+            hand.velocity.z -= nz * vr;
+          }
+        }
+      }
+
       // ── つかむ / はなす（手ごとに独立 → 片手ずつ掛け替えて登れる）
       if (grab) {
         if (!s.grabC && simT > s.cool) this.tryGrab(s);
@@ -2366,40 +2399,65 @@ function stickEnd(e) {
 stickEl.addEventListener('pointerup', stickEnd);
 stickEl.addEventListener('pointercancel', stickEnd);
 
-// タッチボタン。✊は左右2ボタン（左右の手を独立操作・まんなか押し or 両方タッチ=両手）。
-// どのボタンも押したまま上下ドラッグ=うでの高さ（左右共通のオフセット）
+// タッチボタン。✊はトグル式: タップでつかむ→もういちどタップではなす。
+// ✊✊りょうて=両手を一括オン/オフ。左右ペアのまんなか押しも両手あつかい。
+// どのボタンも触れたまま上下ドラッグ=うでの高さ（ドラッグしてもトグルは解除されない）
 const tJump = $('t-jump');
-const grabPair = $('t-grab-pair'), tGrabL = $('t-grab-l'), tGrabR = $('t-grab-r');
+const grabPair = $('t-grab-pair'), tGrabL = $('t-grab-l'), tGrabR = $('t-grab-r'), tGrabB = $('t-grab-b');
 tJump.addEventListener('pointerdown', (e) => { e.preventDefault(); jumpCount++; Sound.play('jump'); });
-const grabPtrs = new Map();   // pointerId → {l, r, y0}
-function refreshTouchGrab() {
-  let l = false, r = false;
-  for (const g of grabPtrs.values()) { l = l || g.l; r = r || g.r; }
-  if ((l && !touchGrabL) || (r && !touchGrabR)) Sound.play('grab');
-  touchGrabL = l;
-  touchGrabR = r;
-  tGrabL.classList.toggle('on', l);
-  tGrabR.classList.toggle('on', r);
-  if (!l && !r) touchArmOff = 0;
+const grabPtrs = new Map();   // pointerId → {l, r, wasOff, x0, y0, moved}
+function syncGrabButtons() {
+  tGrabL.classList.toggle('on', touchGrabL);
+  tGrabR.classList.toggle('on', touchGrabR);
+  tGrabB.classList.toggle('on', touchGrabL && touchGrabR);
+}
+function setTouchGrab(l, r, on) {
+  if (l) touchGrabL = on;
+  if (r) touchGrabR = on;
+  syncGrabButtons();
+}
+// リスポーン・脱力などの強制解除でトグルとハイライトを確実にもどす
+function clearTouchGrabs() {
+  if (!touchGrabL && !touchGrabR) return;
+  touchGrabL = touchGrabR = false;
+  touchArmOff = 0;
+  syncGrabButtons();
+}
+function grabPointerDown(e, l, r) {
+  e.preventDefault();
+  // 対象の手がすでにオンなら「はなすためのタップ」候補（ドラッグなら離さない）
+  const wasOff = !((l && touchGrabL) || (r && touchGrabR));
+  if (wasOff) { setTouchGrab(l, r, true); Sound.play('grab'); }
+  grabPtrs.set(e.pointerId, { l, r, wasOff, x0: e.clientX, y0: e.clientY, moved: 0 });
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* 非対応でもOK */ }
 }
 grabPair.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
   const rect = grabPair.getBoundingClientRect();
   const fx = (e.clientX - rect.left) / Math.max(1, rect.width);
   // 左よりの押し=左手 / 右より=右手 / まんなかのつなぎ目=両手（親指1本で両方おせる）
-  grabPtrs.set(e.pointerId, { l: fx < 0.56, r: fx > 0.44, y0: e.clientY });
-  try { grabPair.setPointerCapture(e.pointerId); } catch (err) { /* 非対応でもOK */ }
-  refreshTouchGrab();
+  grabPointerDown(e, fx < 0.56, fx > 0.44);
 });
-grabPair.addEventListener('pointermove', (e) => {
+tGrabB.addEventListener('pointerdown', (e) => grabPointerDown(e, true, true));
+const grabPointerMove = (e) => {
   const g = grabPtrs.get(e.pointerId);
   if (!g) return;
+  g.moved = Math.max(g.moved, Math.hypot(e.clientX - g.x0, e.clientY - g.y0));
   // 上へドラッグ＝うでを上げる / 下へドラッグ＝下げる（カメラピッチとは独立のオフセット）
   touchArmOff = Math.min(1.7, Math.max(-0.9, (g.y0 - e.clientY) / 90));
-});
-const grabPtrEnd = (e) => { if (grabPtrs.delete(e.pointerId)) refreshTouchGrab(); };
-grabPair.addEventListener('pointerup', grabPtrEnd);
-grabPair.addEventListener('pointercancel', grabPtrEnd);
+};
+const grabPointerEnd = (e) => {
+  const g = grabPtrs.get(e.pointerId);
+  if (!g) return;
+  grabPtrs.delete(e.pointerId);
+  // すでにオンだった手を（ドラッグせず）タップした → はなす
+  if (!g.wasOff && g.moved < 14) setTouchGrab(g.l, g.r, false);
+  if (grabPtrs.size === 0) touchArmOff = 0; // 高さオフセットだけリセット（つかみは保持）
+};
+for (const el of [grabPair, tGrabB]) {
+  el.addEventListener('pointermove', grabPointerMove);
+  el.addEventListener('pointerup', grabPointerEnd);
+  el.addEventListener('pointercancel', grabPointerEnd);
+}
 
 if ('ontouchstart' in window) touchEl.classList.remove('hidden');
 
@@ -2599,6 +2657,7 @@ function enterPlay() {
 
 function requestRespawn() {
   if (state !== 'play') return;
+  clearTouchGrabs();   // リスポーンでモバイルのつかみトグルも解除
   if (isHost) { const d = dolls.get(myId); if (d) d.respawn(); }
   else if (hostConn) hostConn.send({ t: 'rs' });
 }
@@ -2854,12 +2913,14 @@ function hostStep(dt, now) {
   for (const [id, doll] of dolls) {
     const rig = rigs.get(id);
     if (!rig) continue;
+    const limpNow = simT < doll.limpUntil;
+    if (id === myId && limpNow) clearTouchGrabs();   // 脱力＝強制はなす。トグルも解除
     const t = doll.torso;
     rig.setPose(
       t.position, t.quaternion,
       [doll.sides[0].body.position.x, doll.sides[0].body.position.y, doll.sides[0].body.position.z],
       [doll.sides[1].body.position.x, doll.sides[1].body.position.y, doll.sides[1].body.position.z],
-      (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0) | (simT < doll.limpUntil ? 4 : 0), dt,
+      (doll.input.gl ? 1 : 0) | (doll.input.gr ? 2 : 0) | (limpNow ? 4 : 0), dt,
     );
   }
   for (const o of dynObjects) {
@@ -2911,6 +2972,7 @@ function guestStep(now) {
     const rig = rigs.get(id);
     if (!rig) continue;
     const ea = aMap.get(id) || eb;
+    if (id === myId && (eb[14] & 4)) clearTouchGrabs();   // 自分が脱力＝モバイルのつかみトグルも解除
     const px = lerp(ea[1], eb[1], t), py = lerp(ea[2], eb[2], t), pz = lerp(ea[3], eb[3], t);
     _q1.set(ea[4], ea[5], ea[6], ea[7]);
     _q2.set(eb[4], eb[5], eb[6], eb[7]);
