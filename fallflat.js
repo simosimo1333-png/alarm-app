@@ -2288,9 +2288,9 @@ class Doll {
       }
     }
 
-    // ── よじのぼり（本家式・連続の力のみ。テレポート/位置直接セットは使わない）:
-    //    上を見て掴む → 下を見ながら前進 → 引き寄せ力で体が上がる →
-    //    縁の高さに近づいたら上+前へ押し込み、ひざから縁に乗り上げる（1〜2秒の連続モーション）
+    // ── よじのぼり（本家式・完全にプレイヤー入力駆動）:
+    //    上を見て掴む → 「下を見る × 前進入力」の間だけ じわじわ体が持ち上がる。
+    //    入力を離すと力は即ゼロ（慣性のみ残る）→ ぶら下がりにもどる。自動では登らない
     this.climbing = false;
     if (!limp) {
       const pull = Math.min(1, Math.max(0, (0.15 - vp) / 0.85)); // 下をむくほど1（vp<0.15で効きはじめ）
@@ -2298,7 +2298,8 @@ class Doll {
       const ml = Math.hypot(inp.x, inp.z);
       if (ml > 0.15) { fx = inp.x / ml; fz = inp.z / ml; }
       else { const f = torso.quaternion.vmult(new CANNON.Vec3(0, 0, 1)); fx = f.x; fz = f.z; }
-      const fwdBoost = ml > 0.15 ? 1 : 0.45; // 前進入力で引きあげが強まる
+      // 駆動 = カメラ下向き度 × 前進入力の強さ。どちらかが無ければ 0 ＝ 登らない
+      const drive = pull * (ml > 0.15 ? Math.min(1, ml) : 0);
       for (const s of this.sides) {
         if (!s.grabC || !s.holdC) continue;
         // 動的オブジェクト（木箱・岩・他プレイヤーなど）を掴んでいるあいだは
@@ -2308,42 +2309,43 @@ class Doll {
         if (held.type === CANNON.Body.DYNAMIC) continue;
         const hp = s.body.position;
         const hy = hp.y;
-        if (hy > torso.position.y - 0.75) {          // つかまり中〜乗り上げ中（体が手+0.75上まで）
+        if (hy > torso.position.y - 1.0) {           // つかまり中〜乗り上げ中（体が手+1.0上まで）
           this.climbing = true;
-          const rise = torso.position.y - hy;                    // 縁(手)にたいする体の高さ
-          const vault = pull > 0.4 && ml > 0.15 && rise > -0.45; // 乗り上げフェーズ
+          const rise = torso.position.y - hy;                // 縁(手)にたいする体の高さ
+          const vault = drive > 0.25 && rise > -0.45;        // 乗り上げも入力継続が条件
           if (vault) {
-            // 乗り上げ中はホールドをゆるめ、体が手より上へ抜けられるようにする
-            s.holdC.distance += (0.8 - s.holdC.distance) * 0.25;
+            // 乗り上げ中はロープをくり出すように駆動量に比例して距離をのばす（~0.7m/s・上限0.85）。
+            // 距離一致型の拘束なので「のばした分だけ」体が縁の上へ動ける＝入力がなければのびない
+            s.holdC.distance = Math.min(0.85, s.holdC.distance + 0.012 * drive);
           } else {
-            // ホールド距離: 下をむくほど短く＝体が手にひきよせられる
-            const targetDist = 0.72 - pull * fwdBoost * 0.5;     // 0.72(ぶらさがり)〜0.22(ひきあげ)
-            s.holdC.distance += (targetDist - s.holdC.distance) * 0.3;
+            // ホールド距離: 駆動中だけ じわじわ短く（もっさり）。入力をやめると0.72へもどる＝ぶら下がり
+            const targetDist = 0.72 - drive * 0.5;
+            s.holdC.distance += (targetDist - s.holdC.distance) * (0.03 + 0.05 * drive);
           }
-          if (pull > 0.05 && torso.velocity.y < 3.0 && rise < 0.1) {
-            // 胴体を拘束点方向へ引き寄せる連続的な力（上限クランプつき）
+          if (drive > 0.05 && torso.velocity.y < 0.6 && rise < 0.1) {
+            // 拘束点方向への引き寄せ（駆動量に比例・上限クランプ・上昇0.6m/sまで＝もっさり）
             const dx = hp.x - torso.position.x, dy = hy - torso.position.y, dz = hp.z - torso.position.z;
             const dl = Math.hypot(dx, dy, dz) || 1;
-            const F = Math.min(torso.mass * -GRAVITY * (1.1 + 1.6 * pull * fwdBoost), torso.mass * 32);
+            const F = Math.min(torso.mass * -GRAVITY * (0.4 + 1.1 * drive), torso.mass * 24);
             torso.force.x += (dx / dl) * F * 0.5;
             torso.force.y += Math.max(0.25, dy / dl) * F;
             torso.force.z += (dz / dl) * F * 0.5;
           }
           if (vault) {
-            // 上へ: 縁+0.6までもち上げつづける（速度上限つき→1ステップの移動は数cm＝すり抜けない）
-            if (rise < 0.6 && torso.velocity.y < 2.4) {
-              torso.force.y += torso.mass * -GRAVITY * 1.9;
+            // 上へ: 駆動量に比例（上昇0.8m/sまで→1ステップ~1cm＝すり抜けない）。入力をやめれば止まる
+            if (rise < 0.8 && torso.velocity.y < 0.8) {
+              torso.force.y += torso.mass * -GRAVITY * 1.6 * drive;
             }
-            // 前へ: 縁をこえるほど強く押し込み、ひざから乗り上げる（速度上限つき）
+            // 前へ: 縁をこえるほど強く・駆動量に比例（前進1.3m/sまで）
             const fSpd = torso.velocity.x * fx + torso.velocity.z * fz;
-            if (fSpd < 2.2) {
-              const push = torso.mass * (7 + 11 * Math.min(1, Math.max(0, rise + 0.25)));
+            if (fSpd < 1.3) {
+              const push = torso.mass * (5 + 8 * Math.min(1, Math.max(0, rise + 0.25))) * drive;
               torso.force.x += fx * push;
               torso.force.z += fz * push;
             }
-            // のぼり切ったら手をはなす（勢いはそのまま＝連続運動で縁の上に着地）。
+            // 体の下端が縁をこえたら手をはなす（勢いはそのまま＝連続運動で縁の上に着地）。
             // 直後はこの縁の近傍への再グラブを抑止（tryGrab側で判定）→ 掴みなおし連発を防ぐ
-            if (rise > 0.45) {
+            if (rise > 0.72) {
               s.avoid = { x: hp.x, y: hy, z: hp.z, until: simT + 1.5 };
               this.releaseSide(s);
               s.cool = simT + 0.6;
