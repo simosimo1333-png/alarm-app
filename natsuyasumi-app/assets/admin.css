@@ -1,0 +1,27 @@
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px 18px; box-shadow: var(--shadow); margin-bottom: 14px;
+}
+.card h2 { margin: 0 0 12px; font-size: 16px; }
+.card h2 .hint { font-weight: 400; }
+
+.field { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.field label { font-size: 13px; color: var(--muted); min-width: 84px; }
+.field input, .field select {
+  font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+}
+.field input[type="text"], .field input[type="date"] { min-width: 130px; }
+
+table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.tbl th, table.tbl td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+table.tbl th { color: var(--muted); font-size: 12px; }
+table.tbl td.actions { text-align: right; white-space: nowrap; }
+table.tbl select, table.tbl input {
+  font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 8px; background: #fff;
+}
+.pin-ok { color: var(--st-confirm); font-weight: 700; }
+.pin-no { color: var(--danger); }
+
+.inline-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.danger { color: var(--danger); }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; }

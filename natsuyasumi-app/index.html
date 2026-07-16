@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#2563eb" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏖️</text></svg>" />
+  <title>夏休み調整</title>
+  <link rel="stylesheet" href="./assets/app.css" />
+</head>
+<body>
+  <div class="app">
+    <div class="appbar">
+      <h1>🏖️ 夏休み調整</h1>
+      <div class="me" id="meArea" hidden>
+        <label>わたし:
+          <select id="meSelect"></select>
+        </label>
+        <span class="remaining" id="remaining"></span>
+      </div>
+      <div class="spacer"></div>
+      <div class="pin-inline" id="pinArea" hidden>
+        <label>PIN <input id="pinInput" inputmode="numeric" maxlength="4" placeholder="****" /></label>
+        <label class="hint"><input type="checkbox" id="pinRemember" /> 記憶</label>
+      </div>
+      <button class="btn" id="inputModeBtn" hidden>✏️ 入力モード</button>
+      <a class="btn ghost btn-sm" href="./admin.html">⚙️ 管理</a>
+    </div>
+
+    <div id="filters" class="filters" hidden></div>
+
+    <div id="mainArea" hidden>
+      <div class="layout">
+        <div>
+          <div class="cal-head">
+            <button class="btn" id="prevBtn">◀</button>
+            <div class="month" id="monthLabel"></div>
+            <button class="btn" id="nextBtn">▶</button>
+            <div class="spacer"></div>
+          </div>
+          <div class="grid" id="dowRow"></div>
+          <div class="grid" id="calGrid" style="margin-top:6px"></div>
+
+          <div class="legend">
+            <span class="item"><span class="dot confirm"></span>● 確定</span>
+            <span class="item"><span class="dot maru2"></span>◎ 絶対休みたい</span>
+            <span class="item"><span class="dot maru"></span>○ できれば</span>
+            <span class="item"><span class="dot sankaku"></span>△ 候補</span>
+            <span class="item">📌 業務予定</span>
+            <span class="item">⚠️ 要確認</span>
+          </div>
+        </div>
+
+        <!-- 日別詳細(PCでは右パネル固定) -->
+        <div class="sheet" id="sheet">
+          <button class="btn btn-sm close" id="sheetClose">×</button>
+          <div class="sheet-body" id="sheetBody">
+            <p class="hint">日付をタップすると、その日の希望がここに表示されます。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="noticeArea"></div>
+  </div>
+
+  <div class="sheet-backdrop" id="backdrop"></div>
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="./assets/app.js"></script>
+</body>
+</html>

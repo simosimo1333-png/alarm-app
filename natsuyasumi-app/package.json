@@ -1,0 +1,10 @@
+{
+  "name": "natsuyasumi-scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "夏休み調整アプリ — 夏季休暇の希望をカレンダーで共有・調整する業務改善アプリ",
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4"
+  }
+}

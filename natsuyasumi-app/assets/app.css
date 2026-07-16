@@ -1,0 +1,183 @@
+:root {
+  --bg: #f4f6fb;
+  --panel: #ffffff;
+  --line: #e2e7f0;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-weak: #e8f0fe;
+  --warn-bg: #fff4e5;
+  --warn-line: #f59e0b;
+  --danger: #dc2626;
+
+  --st-confirm: #16a34a;   /* ● 確定 */
+  --st-maru2: #ef4444;     /* ◎ 絶対 */
+  --st-maru: #2563eb;      /* ○ できれば */
+  --st-sankaku: #9ca3af;   /* △ 候補 */
+
+  --radius: 14px;
+  --shadow: 0 6px 24px rgba(20, 30, 60, 0.10);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font-family: "Hiragino Kaku Gothic ProN", "BIZ UDPGothic", "Yu Gothic", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-text-size-adjust: 100%;
+  line-height: 1.5;
+}
+
+.app { max-width: 1100px; margin: 0 auto; padding: 12px; }
+
+/* ヘッダー */
+.appbar {
+  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 16px; box-shadow: var(--shadow); margin-bottom: 12px;
+}
+.appbar h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 8px; }
+.appbar .spacer { flex: 1; }
+.appbar .me { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.appbar select, .appbar input {
+  font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+}
+.remaining { font-weight: 700; color: var(--accent); white-space: nowrap; }
+.remaining.zero { color: var(--danger); }
+
+.btn {
+  font: inherit; font-weight: 600; cursor: pointer;
+  padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line);
+  background: #fff; color: var(--text);
+}
+.btn:hover { background: #f7f9fc; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: #1d4ed8; }
+.btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.ghost { background: transparent; }
+.btn-sm { padding: 5px 10px; font-size: 13px; }
+
+/* 課フィルタ */
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  font: inherit; cursor: pointer; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: #fff; color: var(--muted); font-size: 13px;
+}
+.chip.on { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+/* カレンダー */
+.cal-head { display: flex; align-items: center; gap: 12px; margin: 10px 2px; }
+.cal-head .month { font-size: 18px; font-weight: 700; min-width: 130px; text-align: center; }
+.cal-head .spacer { flex: 1; }
+
+.grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.dow { text-align: center; font-size: 12px; color: var(--muted); padding: 4px 0; font-weight: 700; }
+.dow.sun { color: #e11d48; }
+.dow.sat { color: #2563eb; }
+
+.cell {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  min-height: 74px; padding: 5px 6px; cursor: pointer; position: relative;
+  display: flex; flex-direction: column; gap: 3px; text-align: left;
+}
+.cell.blank { background: transparent; border: none; cursor: default; }
+.cell.out { background: #eef1f6; color: #b6bdca; cursor: default; }
+.cell:not(.out):not(.blank):hover { border-color: var(--accent); }
+.cell.today { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cell.warn { background: var(--warn-bg); border-color: var(--warn-line); }
+.cell .dnum { font-size: 13px; font-weight: 700; }
+.cell .dnum .sun { color: #e11d48; }
+.cell .badges { display: flex; flex-wrap: wrap; gap: 3px; margin-top: auto; }
+.pill {
+  font-size: 11px; font-weight: 700; border-radius: 6px; padding: 1px 5px; color: #fff; line-height: 1.5;
+}
+.pill.confirm { background: var(--st-confirm); }
+.pill.maru2 { background: var(--st-maru2); }
+.pill.maru { background: var(--st-maru); }
+.pill.sankaku { background: var(--st-sankaku); }
+.cell .marks { position: absolute; top: 4px; right: 5px; font-size: 12px; display: flex; gap: 2px; }
+.cell.mine-here { box-shadow: inset 0 0 0 2px #fde68a; }
+
+/* 凡例 */
+.legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 2px; font-size: 12px; color: var(--muted); }
+.legend .item { display: flex; align-items: center; gap: 5px; }
+.legend .dot { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
+.dot.confirm { background: var(--st-confirm); }
+.dot.maru2 { background: var(--st-maru2); }
+.dot.maru { background: var(--st-maru); }
+.dot.sankaku { background: var(--st-sankaku); }
+
+/* 日別詳細(モバイル=下シート / PC=右パネル) */
+.sheet-backdrop {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.35); display: none; z-index: 40;
+}
+.sheet-backdrop.show { display: block; }
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+  background: var(--panel); border-radius: 18px 18px 0 0; box-shadow: var(--shadow);
+  padding: 16px; max-height: 82vh; overflow-y: auto; transform: translateY(100%);
+  transition: transform 0.22s ease;
+}
+.sheet.show { transform: translateY(0); }
+.sheet h3 { margin: 0 0 8px; font-size: 17px; }
+.sheet .close { position: absolute; top: 12px; right: 12px; }
+.sheet .warnbox {
+  background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 10px; font-size: 13px;
+}
+.sheet .warnbox b { color: #b45309; }
+.rowline { padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+.rowline:last-child { border-bottom: none; }
+.rowline .lab { display: inline-block; min-width: 74px; font-weight: 700; }
+.rowline .ev { color: #7c3aed; }
+.name-tag { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 6px; background: #f1f5f9; border-radius: 6px; font-size: 13px; }
+.name-tag .role { color: var(--muted); font-size: 11px; }
+
+.input-panel { margin-top: 14px; padding-top: 12px; border-top: 2px solid var(--line); }
+.input-panel .status-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.status-btns .sb {
+  flex: 1 1 60px; text-align: center; padding: 10px 6px; border-radius: 10px; border: 2px solid var(--line);
+  background: #fff; cursor: pointer; font-weight: 700; font: inherit;
+}
+.status-btns .sb.active { color: #fff; }
+.sb[data-st="none"].active { background: #64748b; border-color: #64748b; }
+.sb[data-st="△"].active { background: var(--st-sankaku); border-color: var(--st-sankaku); }
+.sb[data-st="○"].active { background: var(--st-maru); border-color: var(--st-maru); }
+.sb[data-st="◎"].active { background: var(--st-maru2); border-color: var(--st-maru2); }
+.sb[data-st="確定"].active { background: var(--st-confirm); border-color: var(--st-confirm); }
+.memo-row { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
+.memo-row input { flex: 1; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+
+/* 状態メッセージ */
+.notice {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 22px; box-shadow: var(--shadow); max-width: 640px; margin: 24px auto; line-height: 1.7;
+}
+.notice h2 { margin-top: 0; }
+.notice ol { padding-left: 20px; }
+.notice code { background: #eef1f6; padding: 1px 6px; border-radius: 6px; font-size: 90%; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+  background: #111827; color: #fff; padding: 10px 18px; border-radius: 999px; font-size: 14px;
+  opacity: 0; pointer-events: none; transition: all 0.2s; z-index: 100; max-width: 90vw; text-align: center;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.err { background: var(--danger); }
+
+.pin-inline { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.pin-inline input { width: 72px; letter-spacing: 3px; text-align: center; }
+.hint { color: var(--muted); font-size: 12px; }
+a.textlink { color: var(--accent); }
+
+@media (min-width: 860px) {
+  .layout { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
+  .sheet-backdrop { display: none !important; }
+  .sheet {
+    position: sticky; top: 12px; transform: none; border-radius: var(--radius);
+    border: 1px solid var(--line); max-height: none; box-shadow: var(--shadow);
+  }
+  .sheet:not(.show) .sheet-body { display: none; }
+  .sheet .close { display: none; }
+}
