@@ -2021,7 +2021,7 @@ class Doll {
       hand.allowSleep = false;
       hand.dollId = id;
       world.addBody(hand);
-      this.sides.push({ sx, body: hand, grabC: null, holdC: null, cool: 0, elev: 0.6 });
+      this.sides.push({ sx, body: hand, grabC: null, holdC: null, cool: 0, elev: 0.6, avoid: null });
     }
 
     this.place(false); // ゲーム開始時はチェックポイントに立って開始
@@ -2080,6 +2080,14 @@ class Doll {
 
   tryGrab(side) {
     const hand = side.body;
+    // ボールト（のぼり切り）で自動リリースした直後は、おなじ縁の近傍を掴みなおさない。
+    // 掴み入力おしっぱなし/トグルONでも「離す→掴む」を連発せず、登りは1回の掴みで完結する。
+    // べつの場所（より上の縁など）を狙う意図的な掛け替えはそのまま可能
+    if (side.avoid && simT < side.avoid.until) {
+      const a = side.avoid;
+      // 0.9m: のぼり切りで乗り上げた縁の上面もふくむ／二段のぼりの次の縁(1.2m上)はふくまない
+      if (Math.hypot(hand.position.x - a.x, hand.position.y - a.y, hand.position.z - a.z) < 0.9) return;
+    }
     for (const c of world.contacts) {
       let other = null;
       if (c.bi === hand) other = c.bj;
@@ -2333,10 +2341,12 @@ class Doll {
               torso.force.x += fx * push;
               torso.force.z += fz * push;
             }
-            // のぼり切ったら手をはなす（勢いはそのまま＝連続運動で縁の上に着地）
+            // のぼり切ったら手をはなす（勢いはそのまま＝連続運動で縁の上に着地）。
+            // 直後はこの縁の近傍への再グラブを抑止（tryGrab側で判定）→ 掴みなおし連発を防ぐ
             if (rise > 0.45) {
+              s.avoid = { x: hp.x, y: hy, z: hp.z, until: simT + 1.5 };
               this.releaseSide(s);
-              s.cool = simT + 0.35;
+              s.cool = simT + 0.6;
             }
           }
         }
