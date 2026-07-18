@@ -314,21 +314,61 @@ const MAT = {
   cloud: new THREE.MeshLambertMaterial({ color: 0xffffff }),
   leaf: new THREE.MeshLambertMaterial({ color: 0x93c98d }),
   trunk: new THREE.MeshLambertMaterial({ color: 0xb08b62 }),
+  gold: new THREE.MeshLambertMaterial({ color: 0xf2cf6b, emissive: 0x4a3c10 }),
 };
+
+/* ── チャプター配置トランスフォーム ──────────────────────────────
+   コースを「一直線」でなく箱庭（曲がり・分岐・立体）にするため、
+   セグメント一式を 90°単位のヨー＋平行移動で置きなおせるようにする。
+   place(ox,oz,q) 以後の部品は、デザイン座標 p に対して
+   world = (ox,0,oz) + R(q*90°) * p に置かれる（y はそのまま＝絶対値）。 */
+let PL = { x: 0, z: 0, q: 0, quat: null };
+function place(ox, oz, q = 0) {
+  q = ((q % 4) + 4) % 4;
+  PL = { x: ox, z: oz, q, quat: q ? [0, Math.sin(q * Math.PI / 4), 0, Math.cos(q * Math.PI / 4)] : null };
+}
+function tpos(x, y, z) {
+  switch (PL.q) {
+    case 1: return [PL.x + z, y, PL.z - x];
+    case 2: return [PL.x - x, y, PL.z - z];
+    case 3: return [PL.x - z, y, PL.z + x];
+    default: return [PL.x + x, y, PL.z + z];
+  }
+}
+function tvec(v) {  // 方向ベクトル（速度・回転軸など）を回す
+  switch (PL.q) {
+    case 1: return [v[2], v[1], -v[0]];
+    case 2: return [-v[0], v[1], -v[2]];
+    case 3: return [-v[2], v[1], v[0]];
+    default: return [v[0], v[1], v[2]];
+  }
+}
+const cpAt = (x, y, z) => { const p = tpos(x, y, z); return { x: p[0], y: p[1], z: p[2] }; };
+function cpZone(cp, x0, x1, z0, z1, yMin) {
+  const a = tpos(x0, 0, z0), b = tpos(x1, 0, z1);
+  return { cp, x0: Math.min(a[0], b[0]), x1: Math.max(a[0], b[0]), z0: Math.min(a[2], b[2]), z1: Math.max(a[2], b[2]), yMin };
+}
 
 // 旧コンベア用テクスチャの名残（メインループが offset を動かすため入れ物だけ残す）
 const beltTex = new THREE.Texture();
 
 function staticBox(w, h, d, x, y, z, mat, rotX = 0, opts = null) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  m.position.set(x, y, z);
+  const [wx, wy, wz] = tpos(x, y, z);
+  m.position.set(wx, wy, wz);
   if (rotX) m.rotation.x = rotX;
   if (opts && opts.rotY) m.rotation.y = opts.rotY;
   if (opts && opts.rotZ) m.rotation.z = opts.rotZ;
+  let quat = null;
+  if (PL.q) {  // 配置ヨーとローカル回転を合成（物理は quat を使う）
+    const q = new THREE.Quaternion().setFromEuler(m.rotation).premultiply(new THREE.Quaternion(...PL.quat));
+    m.quaternion.copy(q);
+    quat = [q.x, q.y, q.z, q.w];
+  }
   m.receiveShadow = true;
   m.castShadow = true;
   levelRoot.add(m);
-  staticDefs.push({ w, h, d, x, y, z, rotX, ...(opts || {}) });
+  staticDefs.push({ w, h, d, x: wx, y: wy, z: wz, rotX, ...(opts || {}), ...(quat ? { quat } : {}) });
   return m;
 }
 
@@ -337,16 +377,19 @@ function kinObject(mesh, kind, sizeOrRadius, home) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   levelRoot.add(mesh);
-  const o = { mesh, kind, mass: 0, kinematic: true, home: { p: home }, body: null };
+  const p = tpos(...home);
+  const o = { mesh, kind, mass: 0, kinematic: true, home: { p }, body: null };
+  if (PL.quat) { o.home.q = [...PL.quat]; mesh.quaternion.set(...PL.quat); }
   if (kind === 'sphere') o.radius = sizeOrRadius;
   else o.size = sizeOrRadius;
-  mesh.position.set(...home);
+  mesh.position.set(...p);
   dynObjects.push(o);
   return dynObjects.length - 1;
 }
 
 // 見た目だけのワイヤー/棒（毎フレーム2点間に張りなおす）
-// from / to: [x,y,z]（固定点） or 数値（dynObjects の index） or {i, off}（物のローカル点）
+// from / to: [x,y,z]（固定点・ワールド座標＝place() 適用ずみの値を渡す）
+//            or 数値（dynObjects の index） or {i, off}（物のローカル点）
 function addRod(from, to, radius, mat) {
   const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1, 6), mat);
   mesh.castShadow = true;
@@ -361,14 +404,17 @@ function hingedBox(w, h, d, mat, mass, pivot, localPivot, axis, angle0, opts = {
   m.castShadow = m.receiveShadow = true;
   levelRoot.add(m);
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(...axis).normalize(), angle0);
+  if (PL.quat) q.premultiply(new THREE.Quaternion(...PL.quat));
   const off = new THREE.Vector3(...localPivot).applyQuaternion(q);
-  const p = [pivot[0] - off.x, pivot[1] - off.y, pivot[2] - off.z];
+  const wp = tpos(...pivot);
+  const p = [wp[0] - off.x, wp[1] - off.y, wp[2] - off.z];
   m.position.set(...p);
   m.quaternion.copy(q);
   dynObjects.push({
     mesh: m, kind: 'box', size: [w, h, d], mass,
     home: { p, q: [q.x, q.y, q.z, q.w] },
-    hinge: { pivot, localPivot, axis, motorForce: opts.motorForce || 0 },
+    // axis はワールド軸（角度判定用）、axisLocal はボディローカル軸（拘束用）
+    hinge: { pivot: wp, localPivot, axis: tvec(axis), axisLocal: axis, yawQ: PL.quat ? [...PL.quat] : null, motorForce: opts.motorForce || 0 },
     angularDamping: opts.angularDamping,
     body: null,
   });
@@ -378,19 +424,30 @@ function hingedBox(w, h, d, mat, mass, pivot, localPivot, axis, angle0, opts = {
 // ヒンジまわりの回転角（1軸回転前提。橋・レバー・アームの判定用・ホストのみ）
 function hingeAngle(idx) {
   const o = dynObjects[idx];
+  const h = o.hinge;
   const q = o.body.quaternion;
-  const ax = o.hinge.axis;
-  const dot = q.x * ax[0] + q.y * ax[1] + q.z * ax[2]; // sin(θ/2)（軸成分）
-  return 2 * Math.atan2(dot, q.w);
+  let x = q.x, y = q.y, z = q.z, w = q.w;
+  if (h.yawQ) {  // qRel = q * conj(yawQ) — 配置ヨーを取りのぞいてから軸成分を見る
+    const bx = -h.yawQ[0], by = -h.yawQ[1], bz = -h.yawQ[2], bw = h.yawQ[3];
+    const nx = w * bx + x * bw + y * bz - z * by;
+    const ny = w * by - x * bz + y * bw + z * bx;
+    const nz = w * bz + x * by - y * bx + z * bw;
+    const nw = w * bw - x * bx - y * by - z * bz;
+    x = nx; y = ny; z = nz; w = nw;
+  }
+  const dot = x * h.axis[0] + y * h.axis[1] + z * h.axis[2]; // sin(θ/2)（軸成分）
+  return 2 * Math.atan2(dot, w);
 }
 
 function dynBox(w, h, d, x, y, z, mat, mass, opts = {}) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  m.position.set(x, y, z);
+  const p = tpos(x, y, z);
+  m.position.set(...p);
+  if (PL.quat) m.quaternion.set(...PL.quat);
   m.castShadow = true;
   m.receiveShadow = true;
   levelRoot.add(m);
-  dynObjects.push({ mesh: m, kind: 'box', size: [w, h, d], mass, home: { p: [x, y, z] }, body: null, ...opts });
+  dynObjects.push({ mesh: m, kind: 'box', size: [w, h, d], mass, home: { p, ...(PL.quat ? { q: [...PL.quat] } : {}) }, body: null, ...opts });
   return dynObjects.length - 1;
 }
 
@@ -399,7 +456,8 @@ function islandBox(w, d, x, topY, z, topMat = MAT.grass, topH = 0.3) {
   staticBox(w, topH, d, x, topY - topH / 2, z, topMat);
   staticBox(w, 1.15, d, x, topY - topH - 0.575, z, MAT.dirt);      // 断面（茶）
   const taper = new THREE.Mesh(new THREE.BoxGeometry(w * 0.68, 1.5, d * 0.68), MAT.dirtDark);
-  taper.position.set(x, topY - topH - 1.15 - 0.7, z);
+  taper.position.set(...tpos(x, topY - topH - 1.15 - 0.7, z));
+  if (PL.quat) taper.quaternion.set(...PL.quat);
   taper.castShadow = true;
   levelRoot.add(taper);                                            // 底のすぼまり（見た目のみ）
 }
@@ -409,7 +467,7 @@ function islandBox(w, d, x, topY, z, topMat = MAT.grass, topH = 0.3) {
 function chain(from, n, spacing, opts = {}) {
   let sx, sy, sz;
   if (from.anchor) {
-    [sx, sy, sz] = from.anchor;
+    [sx, sy, sz] = tpos(...from.anchor);
   } else {
     const o = dynObjects[from.idx];
     const q = new THREE.Quaternion(...(o.home.q || [0, 0, 0, 1]));
@@ -430,11 +488,11 @@ function chain(from, n, spacing, opts = {}) {
     levelRoot.add(m);
     const y = sy - spacing * (i + 1) - (isBall ? opts.ball.r * 0.6 : 0);
     m.position.set(sx, y, sz);
-    dynObjects.push({ mesh: m, kind: 'sphere', radius: r, mass, rope: true, home: { p: [sx, y, sz] }, body: null });
+    dynObjects.push({ mesh: m, kind: 'sphere', radius: r, mass, rope: true, noStatic: !!opts.noStatic, home: { p: [sx, y, sz] }, body: null });
     links.push(dynObjects.length - 1);
   }
-  GIM.chains.push({ anchor: from.anchor, attachIdx: from.idx, attachLocal: from.local, links, spacing });
-  let prev = from.anchor ? from.anchor : { i: from.idx, off: from.local };
+  GIM.chains.push({ anchor: from.anchor ? [sx, sy, sz] : undefined, attachIdx: from.idx, attachLocal: from.local, links, spacing });
+  let prev = from.anchor ? [sx, sy, sz] : { i: from.idx, off: from.local };
   for (const li of links) { addRod(prev, li, 0.045, MAT.ironDark); prev = li; }
   return links;
 }
@@ -485,36 +543,85 @@ function tree(x, z, y = 0, s = 1) {
   leaf.scale.y = 1.25;
   trunk.castShadow = leaf.castShadow = true;
   g.add(trunk, leaf);
-  g.position.set(x, y, z);
+  g.position.set(...tpos(x, y, z));
   levelRoot.add(g);
 }
 
 function goalFlag(x, y, z) {
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 2.9, 8), MAT.ironDark);
-  pole.position.set(x, y + 1.45, z);
+  pole.position.set(...tpos(x, y + 1.45, z));
   pole.castShadow = true;
   const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.25, 0.78), MAT.flag);
-  flag.position.set(x + 0.65, y + 2.4, z);
+  flag.position.set(...tpos(x + 0.65, y + 2.4, z));
+  if (PL.quat) flag.quaternion.set(...PL.quat);
   levelRoot.add(pole, flag);
 }
 
 function banner(x, y, z, mat = MAT.red) {
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 1.7, 6), MAT.woodDark);
-  pole.position.set(x, y + 0.85, z);
+  pole.position.set(...tpos(x, y + 0.85, z));
   pole.castShadow = true;
   const fl = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.66, 4), mat);
   fl.rotation.z = -Math.PI / 2;
-  fl.position.set(x + 0.38, y + 1.5, z);
+  if (PL.quat) fl.quaternion.premultiply(new THREE.Quaternion(...PL.quat));
+  fl.position.set(...tpos(x + 0.38, y + 1.5, z));
   levelRoot.add(pole, fl);
 }
 
 function trafficCone(x, z, y = 0) {
   const c = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.52, 9), MAT.orange);
-  c.position.set(x, y + 0.29, z);
+  c.position.set(...tpos(x, y + 0.29, z));
   c.castShadow = true;
   const b = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.07, 0.48), MAT.orange);
-  b.position.set(x, y + 0.035, z);
+  b.position.set(...tpos(x, y + 0.035, z));
   levelRoot.add(c, b);
+}
+
+/* ── 箱庭の小物: ごほうびの星・気球・バウンドきのこ（かざり＋あそび） ── */
+function goldStar(x, y, z, s = 1) {
+  const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.42 * s, 0), MAT.gold);
+  star.scale.y = 1.35;
+  star.position.set(...tpos(x, y + 1.15 * s, z));
+  star.castShadow = true;
+  levelRoot.add(star);
+  GIM.stars.push(star);                                     // くるくる回る（見た目のみ）
+  staticBox(0.52 * s, 0.6 * s, 0.52 * s, x, y + 0.3 * s, z, MAT.stone);
+}
+
+function balloon(x, y, z, s = 1, mat = MAT.red) {          // 気球（ランドマーク・かざり）
+  const g = new THREE.Group();
+  const env = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 10), mat);
+  env.scale.y = 1.18;
+  const skirt = new THREE.Mesh(new THREE.ConeGeometry(1.05, 1.4, 10), mat);
+  skirt.rotation.x = Math.PI;
+  skirt.position.y = -2.9;
+  const basket = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.75, 1.05), MAT.crate);
+  basket.position.y = -4.15;
+  env.castShadow = basket.castShadow = true;
+  g.add(env, skirt, basket);
+  for (const [ox, oz] of [[-0.42, -0.42], [0.42, -0.42], [-0.42, 0.42], [0.42, 0.42]]) {
+    const r = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.7, 4), MAT.ironDark);
+    r.position.set(ox, -3.2, oz);
+    g.add(r);
+  }
+  g.scale.setScalar(s);
+  const p = tpos(x, y, z);
+  g.position.set(...p);
+  levelRoot.add(g);
+  GIM.floaters.push({ g, y0: p[1], ph: x + z });            // ふわふわ上下（見た目のみ）
+}
+
+function bounceShroom(x, y, z, power = 9, r = 1.4) {       // 上面 y でバウンド
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.3 * r, 0.42 * r, 3.6, 9), MAT.plaster);
+  stem.position.set(...tpos(x, y - 1.9, z));
+  stem.castShadow = true;
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), MAT.red);
+  cap.scale.y = 0.52;
+  cap.position.set(...tpos(x, y - 0.22, z));
+  cap.castShadow = true;
+  levelRoot.add(stem, cap);
+  const box = staticBox(r * 1.4, 0.3, r * 1.4, x, y - 0.15, z, MAT.red, 0, { bounce: power });
+  box.visible = false;                                      // 当たりはキャップの中にかくす
 }
 
 function crenels(x, y, z, len, along = 'x') {
@@ -538,16 +645,19 @@ function makeRng(seed) {
   };
 }
 
-// とおくに浮かぶ かざりの小島
-function isletDeco(seed, n, zMax) {
+// とおくに浮かぶ かざりの小島。spots: [{x0,x1,z0,z1,n,lo?}]（ワールド座標の矩形。
+// コースが箱庭状に曲がるため、通り道とぶつからない場所を各コースが指定する）
+function isletDeco(seed, spots) {
   const rng = makeRng(seed);
-  for (let i = 0; i < n; i++) {
-    const x = (rng() < 0.5 ? -1 : 1) * (16 + rng() * 18);
-    const z = -10 + rng() * (zMax + 20);
-    const y = rng() < 0.35 ? 5 + rng() * 7 : -4 - rng() * 6;
-    const s = 2.6 + rng() * 3.2;
-    islandBox(s, s * (0.8 + rng() * 0.5), x, y, z);
-    if (rng() < 0.7) tree(x + (rng() - 0.5) * s * 0.4, z + (rng() - 0.5) * s * 0.4, y, 0.8 + rng() * 0.6);
+  for (const sp of spots) {
+    for (let i = 0; i < sp.n; i++) {
+      const x = sp.x0 + rng() * (sp.x1 - sp.x0);
+      const z = sp.z0 + rng() * (sp.z1 - sp.z0);
+      const y = (sp.lo || rng() >= 0.35) ? -4 - rng() * 6 : 5 + rng() * 7;
+      const s = 2.6 + rng() * 3.2;
+      islandBox(s, s * (0.8 + rng() * 0.5), x, y, z);
+      if (rng() < 0.7) tree(x + (rng() - 0.5) * s * 0.4, z + (rng() - 0.5) * s * 0.4, y, 0.8 + rng() * 0.6);
+    }
   }
 }
 
@@ -559,7 +669,7 @@ function gimButtonDoor(btnPos, doorHome, doorSize, openY, msg, doorMat = MAT.red
   const capIdx = kinObject(cap, 'box', [0.42, 0.28, 0.42], btnPos);
   const door = new THREE.Mesh(new THREE.BoxGeometry(...doorSize), doorMat);
   const doorIdx = kinObject(door, 'box', doorSize, doorHome);
-  GIM.buttons.push({ capIdx, pos: [...btnPos], doorIdx, homeY: doorHome[1], openY, msg, objHit: !!opts.objHit });
+  GIM.buttons.push({ capIdx, pos: tpos(...btnPos), doorIdx, homeY: doorHome[1], openY, msg, objHit: !!opts.objHit });
   return doorIdx;
 }
 
@@ -571,7 +681,7 @@ function gimPadDoor(padPos, doorHome, doorSize, openY, msg, doorMat = MAT.blue) 
   const padIdx = kinObject(pad, 'box', [1.7, 0.14, 1.7], [padPos[0], padPos[1], padPos[2]]);
   const door = new THREE.Mesh(new THREE.BoxGeometry(...doorSize), doorMat);
   const doorIdx = kinObject(door, 'box', doorSize, doorHome);
-  GIM.pads.push({ padIdx, gateIdx: doorIdx, padPos: [padPos[0], padPos[1] + 0.07, padPos[2]], padHomeY: padPos[1], gateHomeY: doorHome[1], gateOpenY: openY, msg });
+  GIM.pads.push({ padIdx, gateIdx: doorIdx, padPos: tpos(padPos[0], padPos[1] + 0.07, padPos[2]), padHomeY: padPos[1], gateHomeY: doorHome[1], gateOpenY: openY, msg });
   return doorIdx;
 }
 
@@ -583,7 +693,8 @@ function gimLever(x, y, z, angle0 = 0, opts = {}) {
   staticBox(0.14, postH, 0.14, x + 0.32, baseY + postH / 2, z, MAT.ironDark);
   const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.42, 8), MAT.ironDark);
   axle.rotation.z = Math.PI / 2;
-  axle.position.set(x + 0.18, y, z);
+  if (PL.quat) axle.quaternion.premultiply(new THREE.Quaternion(...PL.quat));
+  axle.position.set(...tpos(x + 0.18, y, z));
   axle.castShadow = true;
   levelRoot.add(axle);
   // 長めのバー＋低めの支点＝体でおしても、つかんでひいても動かせる
@@ -603,7 +714,7 @@ function hangingBridge(x, y, z0, z1, w, n, mat = MAT.woodDark) {
     // 板は広め（すきま最小）・重め・回転減衰つよめ＝ゆれるが すきまに落ちない
     planks.push(dynBox(w, 0.12, step * 0.9, x, y, z0 + step * (i + 1), mat, 6, { rope: true, angularDamping: 0.65 }));
   }
-  GIM.plankBridges.push({ a: [x, y, z0], b: [x, y, z1], planks, joint: step / 2, w });
+  GIM.plankBridges.push({ a: tpos(x, y, z0), b: tpos(x, y, z1), planks, joint: step / 2, w, q: PL.quat ? [...PL.quat] : null });
   for (const ze of [z0, z1]) {   // りょうはしの門ばしら（通行のじゃまにならない位置）
     staticBox(0.24, 1.3, 0.24, x - w / 2 - 0.5, y + 0.4, ze, mat);
     staticBox(0.24, 1.3, 0.24, x + w / 2 + 0.5, y + 0.4, ze, mat);
@@ -616,7 +727,8 @@ function spinnerDisc(x, topY, z, r, omega, mat = MAT.hazard) {
   const disc = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.26, 22), mat);
   const idx = kinObject(disc, 'box', [r * 1.7, 0.26, r * 1.7], [x, topY - 0.13, z]);
   dynObjects[idx].spin = omega;          // 乗った人の足もとを流す（Doll.controlが参照）
-  dynObjects[idx].spinCenter = [x, z];
+  const wc = tpos(x, 0, z);
+  dynObjects[idx].spinCenter = [wc[0], wc[2]];
   const mark = new THREE.Mesh(new THREE.BoxGeometry(r * 1.9, 0.09, 0.3), MAT.ironDark);
   mark.position.y = 0.14;
   disc.add(mark);
@@ -629,7 +741,9 @@ function spinnerDisc(x, topY, z, r, omega, mat = MAT.hazard) {
 function moverBox(size, home, axis, amp, omega, phase = 0, mat = MAT.hazard) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), mat);
   const idx = kinObject(mesh, 'box', size, home);
-  GIM.movers.push({ idx, axis, base: axis === 'x' ? home[0] : home[2], amp, omega, phase });
+  const p = dynObjects[idx].home.p;                     // ワールド座標（place 適用ずみ）
+  const wAxis = (PL.q % 2) ? (axis === 'x' ? 'z' : 'x') : axis;
+  GIM.movers.push({ idx, axis: wAxis, base: wAxis === 'x' ? p[0] : p[2], amp, omega, phase });
   return idx;
 }
 
@@ -695,12 +809,16 @@ function buildCourse1() {
   staticBox(0.9, 1.1, 0.9, -3.4, 4.4, 8.5, MAT.brick);
 
   banner(-4.2, 3.9, 35.6, MAT.blue);                             // 屋上（ここは中間地点）
+  goldStar(-4.1, 1.95, 35.6, 0.7);                               // よりみちのごほうび（ロフトのおく）
 
-  // ── ⑥ うらにわ: 屋根からすべり台でおりる ──
+  /* ═══ 第2章（東へまがる）: 屋根のすべり台 → うらにわ ═══
+     ここからコースは家のうしろで直角にまがり、うらにわが東にひろがる（箱庭化） */
+  place(-37.4, 38.0, 1);
+  // ── ⑥ うらにわ: 屋根からすべり台でおりる（東むき） ──
   staticBox(2.4, 0.22, 8.8, 0, 1.82, 40.9, MAT.wood, 0.42);      // すべり台
   staticBox(0.16, 0.34, 8.8, -1.28, 1.98, 40.9, MAT.woodDark, 0.42);
   staticBox(0.16, 0.34, 8.8, 1.28, 1.98, 40.9, MAT.woodDark, 0.42);
-  islandBox(18, 20, 0, 0, 54);                                   // うらにわ（z44..64）
+  islandBox(18, 20, 0, 0.03, 54);                                // うらにわ（家の島と少しかさなってつながる）
   tree(-7.4, 47, 0, 1.1); tree(7.2, 49, 0, 0.9); tree(-6.8, 60, 0, 0.95);
   staticBox(1.9, 0.42, 0.7, -5.5, 0.21, 52, MAT.woodDark);       // ベンチ
   staticBox(0.55, 0.35, 0.55, 5.5, 0.17, 46.5, MAT.red);         // 花だん
@@ -716,71 +834,145 @@ function buildCourse1() {
     null, MAT.leaf, { objHit: true });
   dynBox(0.45, 0.45, 0.45, -2.0, 0.5, 58.5, MAT.red, 5, { noSleep: true });   // なげる用の箱
   dynBox(0.45, 0.45, 0.45, -1.2, 0.5, 59.3, MAT.blue, 5, { noSleep: true });
+  // 門のさきは ふたまたの分かれ道（みなみ=あか / きた=あお）
+  banner(6.4, 0, 63.2, MAT.red);
+  banner(-6.4, 0, 63.2, MAT.blue);
 
-  // ── ⑧ シーソー橋（z64..71）: バランスをとってわたる ──
+  /* ═══ 第3章A みなみルート: シーソー橋 → 果樹園 → ゆれるつり橋 ═══ */
+  place(-37.4, 31.6, 1);
+  // ── ⑧ シーソー橋: バランスをとってわたる ──
   staticBox(0.55, 3.4, 0.55, 0, -1.3, 67.5, MAT.woodDark);       // 中心の支柱
+  staticBox(2.5, 0.3, 1.2, 0, 0.15, 63.4, MAT.stone);            // ふみ石（島→板さきの段さしけし）
   hingedBox(2.3, 0.16, 7.6, MAT.wood, 8, [0, 0.68, 67.5], [0, 0, 0], [1, 0, 0], -0.13,
     { angularDamping: 0.55 });
-  islandBox(14, 8, 0, 0, 75);                                    // 果樹園の島（z71..79）
+  islandBox(14, 8, 0, 0, 75);                                    // 果樹園の島
   tree(-4.5, 73, 0, 1.2); tree(4.2, 76.5, 0, 1.05); tree(0.5, 77.5, 0, 0.8);
   // よじ登り②: 果樹園の石垣（1.45m・島のはば全体）
   staticBox(14, 1.45, 0.6, 0, 0.725, 74.6, MAT.stoneDark);
-
-  // ── ⑨ ゆれるつり橋（z79..87） ──
+  // ── ⑨ ゆれるつり橋 ──
   hangingBridge(0, 0.0, 79, 87, 2.4, 5, MAT.wood);
-  islandBox(12, 8, 0, 0, 91);                                    // にわのテラス（z87..95）
-  banner(-4.5, 0, 89, MAT.red); tree(4.6, 89.3, 0, 1.0);
-  // よじ登り③: テラスの高台（1.5m）。のぼった先からターザンへ
-  staticBox(12, 1.5, 4, 0, 0.75, 93, MAT.grass);
 
-  // ── ⑩ くさりターザンで大ジャンプ（z95..99.5・高台からとびつく） ──
-  staticBox(0.5, 8, 0.5, -2.6, 3, 97.2, MAT.woodDark);           // やぐら
-  staticBox(0.5, 8, 0.5, 2.6, 3, 97.2, MAT.woodDark);
-  staticBox(5.6, 0.4, 0.5, 0, 6.8, 97.2, MAT.woodDark);
-  chain({ anchor: [0, 6.6, 97.2] }, 7, 0.55, { grip: true });
+  /* ═══ 第3章B きたルート: バウンドきのこの空とび（あたらしいあそび） ═══ */
+  place(-37.4, 44.4, 1);
+  bounceShroom(0, -1.1, 66.4, 9);
+  islandBox(3.4, 3.4, 0, -0.2, 69.5);                            // とちゅうの小島
+  bounceShroom(0, -1.1, 73, 9);
+  islandBox(4.5, 4.5, 0, -0.2, 77);                              // 休けいの小島（中間地点）
+  banner(0, -0.2, 76.2, MAT.blue);
+  bounceShroom(0, -1.1, 81, 9);
+  islandBox(3.4, 3.4, 0, -0.2, 84);                              // さいごの小島 → テラスへジャンプ
+
+  /* ═══ ごうりゅう: にわのテラス（ここからまた北へまがる） ═══ */
+  place(0, 0, 0);
+  islandBox(8, 18, 53.6, 0, 38);                                 // テラス（x49.6..57.6, z29..47）
+  banner(50.6, 0, 34, MAT.red); tree(50.8, 44.5, 0, 1.0);
+  // よじ登り③: テラスの高台（1.5m）。のぼった先からターザンへ
+  staticBox(4, 1.5, 6, 55, 0.75, 41, MAT.grass);
+  // ── ⑩ くさりターザンで大ジャンプ（高台のきたはしからとびつく） ──
+  staticBox(0.5, 8, 0.5, 52.4, 3, 46.2, MAT.woodDark);           // やぐら
+  staticBox(0.5, 8, 0.5, 57.6, 3, 46.2, MAT.woodDark);
+  staticBox(5.6, 0.4, 0.5, 55, 6.8, 46.2, MAT.woodDark);
+  chain({ anchor: [55, 6.6, 46.2] }, 9, 0.55, { grip: true });   // 長め: とびついてつかみやすく
 
   // ── ⑪ そらのテラス: あずまやの旗がゴール ──
-  islandBox(12, 8.5, 0, 0, 103.7);                               // z99.5..107.9
-  staticBox(0.22, 2.4, 0.22, -1.3, 1.2, 103.9, MAT.wood);        // あずまや
-  staticBox(0.22, 2.4, 0.22, 1.3, 1.2, 103.9, MAT.wood);
-  staticBox(0.22, 2.4, 0.22, -1.3, 1.2, 106.5, MAT.wood);
-  staticBox(0.22, 2.4, 0.22, 1.3, 1.2, 106.5, MAT.wood);
+  islandBox(12, 8.5, 55, 0, 52.75);                              // x49..61, z48.5..57
+  staticBox(0.22, 2.4, 0.22, 53.7, 1.2, 52.6, MAT.wood);         // あずまや
+  staticBox(0.22, 2.4, 0.22, 56.3, 1.2, 52.6, MAT.wood);
+  staticBox(0.22, 2.4, 0.22, 53.7, 1.2, 55.2, MAT.wood);
+  staticBox(0.22, 2.4, 0.22, 56.3, 1.2, 55.2, MAT.wood);
   const gzRoof = new THREE.Mesh(new THREE.ConeGeometry(2.5, 1.4, 6), MAT.roof);
-  gzRoof.position.set(0, 3.1, 105.2);
+  gzRoof.position.set(55, 3.1, 53.9);
   gzRoof.castShadow = true;
   levelRoot.add(gzRoof);
-  tree(-4.6, 101, 0, 0.9); tree(4.6, 106, 0, 0.9);
-  goalFlag(0, 0, 105.2);
-  isletDeco(11, 9, 100);
+  tree(50.4, 55.8, 0, 0.9); tree(59.6, 55, 0, 0.9);
+  banner(51.4, 0, 50.5, MAT.red);                                // あずまや島は中間地点になった
+
+  /* ═══ 第4章（延長・北へ→東へL字）: つり橋 → 北の庭 → 動く足場 → 東の島 → ターザン → ゴール
+     （place() は使わずワールド座標で組む。北へ→北東かどから東へまがる） ═══ */
+  // ⑫ あずまや島（z57）の北へ ゆれるつり橋でわたる
+  hangingBridge(55, 0.0, 57.3, 63.3, 2.4, 4, MAT.wood);
+  islandBox(13, 11, 55, 0, 69);                                  // 北の庭 x48.5..61.5, z63.5..74.5
+  tree(50.2, 66, 0, 1.05); banner(60, 0, 65.5, MAT.blue);
+  staticBox(0.55, 0.35, 0.55, 59, 0.17, 72, MAT.gold);           // 花だん（かざり）
+  // よじ登り④: 北の庭の石垣（1.45m・こえた先に北がわの庭がつづく）
+  staticBox(13, 1.45, 0.5, 55, 0.725, 70.5, MAT.brick);
+  staticBox(13.2, 0.12, 0.62, 55, 1.51, 70.5, MAT.plaster);
+  // ⑬ 北東かどから 東へ: 動く足場（X方向に往復）で東の島へわたる
+  moverBox([3, 0.3, 3], [62, 0.05, 72.5], 'x', 3.5, 0.5, 0, MAT.wood);   // x58.5..65.5
+  islandBox(10, 12, 71, 0, 72);                                  // 東の島 x66..76, z66..78
+  tree(74, 68, 0, 0.95); banner(67, 0, 69, MAT.red);
+  // ⑭ くさりターザンで 東へ大ジャンプ（東の島 → ゴール見晴らし台）
+  staticBox(0.5, 7, 0.5, 68.6, 3, 72, MAT.woodDark);
+  staticBox(0.5, 7, 0.5, 73.4, 3, 72, MAT.woodDark);
+  staticBox(5.2, 0.4, 0.5, 71, 5.8, 72, MAT.woodDark);
+  chain({ anchor: [71, 5.6, 72] }, 9, 0.55, { grip: true });
+  // ── 見晴らし台: あずまやの旗がゴール（さらに東 x82） ──
+  islandBox(12, 10, 82, 0, 72);                                  // x76..88, z67..77
+  staticBox(0.22, 2.4, 0.22, 80.7, 1.2, 70.7, MAT.wood);         // あずまや
+  staticBox(0.22, 2.4, 0.22, 83.3, 1.2, 70.7, MAT.wood);
+  staticBox(0.22, 2.4, 0.22, 80.7, 1.2, 73.3, MAT.wood);
+  staticBox(0.22, 2.4, 0.22, 83.3, 1.2, 73.3, MAT.wood);
+  const gz2Roof = new THREE.Mesh(new THREE.ConeGeometry(2.5, 1.4, 6), MAT.roof);
+  gz2Roof.position.set(82, 3.1, 72);
+  gz2Roof.castShadow = true;
+  levelRoot.add(gz2Roof);
+  tree(78, 75, 0, 0.95); tree(86, 74.5, 0, 0.9);
+  goalFlag(82, 0, 72);
+
+  /* ═══ よりみち: テラスのみなみに ほしの小島（ごほうび） ═══ */
+  islandBox(2.2, 2.2, 54.2, -0.6, 25.8);                         // とび石
+  islandBox(2.2, 2.2, 56.2, -1.1, 22.4);
+  islandBox(5.5, 5, 55, -1.2, 18.6);                             // ほしの小島
+  goldStar(55, -1.2, 17.6, 1.3);
+  staticBox(0.55, 0.35, 0.55, 53.4, -1.05, 18.2, MAT.red);       // 花だん
+  staticBox(0.55, 0.35, 0.55, 56.7, -1.05, 19.2, MAT.blue);
+  bounceShroom(55.2, -0.9, 20.6, 10);                            // きのこでテラスへもどる
+
+  /* ── ランドマークとかざり ── */
+  balloon(30, 14.5, 10, 1.6, MAT.red);                           // 気球（スタートから見える）
+  balloon(64, 11.5, 47, 1.1, MAT.blue);
+  isletDeco(11, [
+    { x0: -30, x1: -16, z0: -6, z1: 50, n: 4 },                  // 西のそら
+    { x0: 2, x1: 40, z0: 62, z1: 76, n: 3 },                     // きたのそら
+    { x0: 68, x1: 84, z0: 10, z1: 56, n: 3, lo: true },          // ゴールのひがし（ひくめ）
+  ]);
 
   CHECKPOINTS = [
     { x: 0, y: 0.9, z: 0.5 },        // スタート（にわ）
     { x: 0, y: 0.9, z: 16.5 },       // 部屋B
     { x: 0, y: 0.9, z: 27.5 },       // 部屋C
     { x: 3, y: 2.9, z: 34.5 },       // ロフト
-    { x: 0, y: 0.9, z: 46.5 },       // うらにわ
-    { x: 0, y: 0.9, z: 63.2 },       // いけがきの門
-    { x: 0, y: 0.9, z: 72.8 },       // 果樹園
-    { x: 0, y: 0.9, z: 88.8 },       // にわのテラス
+    { x: 9.1, y: 0.9, z: 38 },       // うらにわ（すべり台のさき）
+    { x: 25.8, y: 0.9, z: 38 },      // いけがきの門のさき（分かれ道）
+    { x: 35.4, y: 0.9, z: 31.6 },    // 果樹園（みなみルート）
+    { x: 51.4, y: 0.9, z: 38 },      // ごうりゅうのテラス
+    { x: 55, y: 0.9, z: 50.5 },      // あずまや島（中間地点）
+    { x: 55, y: 0.9, z: 68 },        // 北の庭
+    { x: 71, y: 0.9, z: 72 },        // 東の島（ターザンのまえ）
   ];
   CP_ZONES = [
     { cp: 1, x0: -5, x1: 5, z0: 15.2, z1: 18, yMin: -0.5 },
     { cp: 2, x0: -5, x1: 5, z0: 26.2, z1: 29, yMin: -0.5 },
     { cp: 3, x0: 0.5, x1: 5.3, z0: 31, z1: 36, yMin: 1.6 },
-    { cp: 4, x0: -8, x1: 8, z0: 44.5, z1: 48.5, yMin: -0.5 },
-    { cp: 5, x0: -2.5, x1: 2.5, z0: 62.4, z1: 64, yMin: -0.5 },
-    { cp: 6, x0: -7, x1: 7, z0: 71.2, z1: 74.2, yMin: -0.5 },
-    { cp: 7, x0: -6, x1: 6, z0: 87.2, z1: 90.5, yMin: -0.5 },
-    { cp: 8, x0: -5, x1: 5, z0: 99.6, z1: 102, yMin: -0.5 },
+    { cp: 4, x0: 7.1, x1: 11.1, z0: 30, z1: 46, yMin: -0.5 },    // うらにわ
+    { cp: 5, x0: 25, x1: 26.6, z0: 35.5, z1: 40.5, yMin: -0.5 }, // 門のさき
+    { cp: 6, x0: 33.8, x1: 36.8, z0: 24.6, z1: 38.6, yMin: -0.5 },  // 果樹園（ルートA）
+    { cp: 6, x0: 37.4, x1: 41.8, z0: 42.2, z1: 46.6, yMin: -1.0 },  // きのこの休けい島（ルートB）
+    { cp: 7, x0: 49.8, x1: 53.2, z0: 29, z1: 47, yMin: -0.5 },   // テラス（ごうりゅう）
+    { cp: 8, x0: 50, x1: 60, z0: 48.6, z1: 56.5, yMin: -0.5 },   // あずまや島（中間地点）
+    { cp: 9, x0: 49, x1: 61, z0: 63.5, z1: 74.5, yMin: -0.5 },   // 北の庭
+    { cp: 10, x0: 66, x1: 76, z0: 66, z1: 78, yMin: -0.5 },      // 東の島
   ];
-  GOAL = { x0: -5, x1: 5, z0: 103.8, y: -0.6 };
+  GOAL = { x0: 76, x1: 88, z0: 67, y: -0.6 };
 }
 
 /* =====================================================================
-   コース2「こうじげんば」— 工事現場・解体（8分規模）
-   レバーのリフト → 鉄球スイング → こわせるかべ → ウィンチ/はり渡り
+   コース2「こうじげんば」— 工事現場・解体（8分規模・箱庭化）
+   まんなかの大タワークレーンのまわりを らせん（北→東→南→西）にのぼる。
+   リフト → 鉄球スイング → こわせるかべ → ウィンチ/空中の梁 → てっぺんへ
    ===================================================================== */
 function buildCourse2() {
+  /* ═══ 第1章（北へ）: ヤード → リフト → デッキ1 ═══ */
   // ── スタートのヤード（コンクリの浮き島） ──
   islandBox(13, 14, 0, 0, 1, MAT.concrete);        // z -6..8
   trafficCone(1.6, 6.4); trafficCone(-2.2, 7.0); trafficCone(4.2, -2.5); trafficCone(-4.5, 2);
@@ -813,19 +1005,21 @@ function buildCourse2() {
   staticBox(3.5, 1.5, 2.4, -1.75, 3.75, 21, MAT.orange);
   staticBox(3.5, 1.5, 2.4, 1.75, 3.75, 21, MAT.blue);
 
-  // ── ② 鉄球（レッキングボール）: くさりにとびついてスイング（z26..30.5のすきま） ──
+  /* ═══ 第2章（東へまがる）: 鉄球 → デッキ2 → こわせるかべ → ウィンチ → 屋上 ═══ */
+  place(-22.5, 24, 1);
+  // ── ② 鉄球（レッキングボール）: くさりにとびついてスイング（デッキ1の東のすきま） ──
   staticBox(0.55, 12, 0.55, 3.9, 2.5, 28.25, MAT.hazard);         // クレーンのマスト
   staticBox(8.4, 0.4, 0.55, 0, 8.6, 28.25, MAT.hazard);           // クレーンのうで
   chain({ anchor: [0, 8.4, 28.25] }, 7, 0.6, { ball: { r: 0.6, mass: 14, mat: MAT.iron } });
   staticBox(0.42, 0.25, 5.6, 2.9, 2.875, 28.25, MAT.orange);      // 正攻法: 細い鉄骨のはり渡り
 
-  // ── デッキ2（y3.0, z30.5..41.2） ──
+  // ── デッキ2（y3.0・東うで） ──
   staticBox(7, 0.4, 10.7, 0, 2.8, 35.85, MAT.concrete);
   for (const [cx, cz] of [[-3, 31.5], [3, 31.5], [-3, 40.5], [3, 40.5]]) {
     staticBox(0.45, 7, 0.45, cx, -0.9, cz, MAT.ironDark);
   }
 
-  // ── ③ こわせるかべ（z36.2）: 鉄球や木箱をぶつけてくずす ──
+  // ── ③ こわせるかべ: 鉄球や木箱をぶつけてくずす ──
   GIM.breakables.push({ hit: false, announced: false });
   for (let row = 0; row < 3; row++) {
     for (let col = 0; col < 4; col++) {
@@ -841,17 +1035,17 @@ function buildCourse2() {
   const gondola = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.25, 2.3), MAT.hazard);
   const gondolaIdx = kinObject(gondola, 'box', [2.3, 0.25, 2.3], [0, 2.875, 42.4]);
   GIM.lifts.push({ leverIdx: winchLever, liftIdx: gondolaIdx, y0: 2.875, y1: 6.175, target: 2.875, speed: 0.5 });
-  addRod([0, 8.6, 42.4], gondolaIdx, 0.04, MAT.ironDark);          // つりワイヤー（見た目）
+  addRod(tpos(0, 8.6, 42.4), gondolaIdx, 0.04, MAT.ironDark);      // つりワイヤー（見た目）
   staticBox(0.35, 6, 0.35, -1.5, 5.6, 42.4, MAT.ironDark);
   staticBox(0.35, 6, 0.35, 1.5, 5.6, 42.4, MAT.ironDark);
   staticBox(3.4, 0.3, 0.35, 0, 8.75, 42.4, MAT.ironDark);
 
-  // ── ⑤ 鉄骨のはり: とびうつってのぼる（ひとりでも上がれる正攻法） ──
+  // ── ⑤ 鉄骨のはり: とびうつってのぼる（ひとりでも上がれる正攻法・きた側） ──
   staticBox(1.3, 0.28, 1.0, -4.6, 3.9, 41.4, MAT.orange);
   staticBox(1.3, 0.28, 1.0, -4.6, 4.8, 42.6, MAT.orange);
   staticBox(1.3, 0.28, 1.0, -4.6, 5.7, 43.8, MAT.orange);
 
-  // ── ゴールの屋上（y6.3, z43.7..50.5） ──
+  // ── ビルの屋上（y6.3・北東かど）: ここがふたまたの分かれ道 ──
   staticBox(7, 0.4, 6.8, 0, 6.1, 47.1, MAT.concrete);
   for (const [cx, cz] of [[-3, 44.5], [3, 44.5], [-3, 50], [3, 50]]) {
     staticBox(0.45, 13.4, 0.45, cx, -0.4, cz, MAT.ironDark);
@@ -863,12 +1057,14 @@ function buildCourse2() {
   staticBox(0.4, 4, 0.4, 3, 8.3, 50, MAT.orange);
   staticBox(6.4, 0.35, 0.4, 0, 10.3, 50, MAT.orange);
 
-  // ── ⑥ せまい梁のバランス渡り＋回転する床（y6.3, z50.5..70.8） ──
+  /* ═══ 第3章A（南へまがる・正面ルート）: バランス梁 → 回転床 → おもりエレベーター ═══ */
+  place(24.6, 71, 2);
+  // ── ⑥ せまい梁のバランス渡り＋回転する床（y6.3） ──
   staticBox(0.5, 0.25, 6.4, -1.2, 6.175, 53.7, MAT.orange);      // せまい梁A
   spinnerDisc(0, 6.3, 58.7, 1.9, 0.65);                          // 回転する床1
   staticBox(0.5, 0.25, 6.4, 1.2, 6.175, 63.9, MAT.orange);       // せまい梁B
   spinnerDisc(0, 6.3, 68.9, 1.9, -0.75);                         // 回転する床2（ぎゃく回転）
-  staticBox(5.5, 0.4, 4, 0, 6.1, 73, MAT.concrete);              // 休けいデッキ（z71..75）
+  staticBox(5.5, 0.4, 4, 0, 6.1, 73, MAT.concrete);              // 休けいデッキ
   staticBox(0.45, 13, 0.45, -2.4, 0, 73, MAT.ironDark);
   staticBox(0.45, 13, 0.45, 2.4, 0, 73, MAT.ironDark);
   trafficCone(-2.1, 72, 6.3);
@@ -876,7 +1072,8 @@ function buildCourse2() {
   // ── ⑦ おもりエレベーター: かごに木箱をつむと リフトがあがる ──
   const balMesh = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.25, 2.4), MAT.hazard);
   const balIdx = kinObject(balMesh, 'box', [2.4, 0.25, 2.4], [0, 6.175, 76.2]);
-  GIM.balances.push({ liftIdx: balIdx, zone: [3.3, 73.4], rx: 1.05, rz: 1.05, yMin: 6.0, yMax: 8.2, needMass: 25, y0: 6.175, y1: 10.075 });
+  const balZone = tpos(3.3, 0, 73.4);
+  GIM.balances.push({ liftIdx: balIdx, zone: [balZone[0], balZone[2]], rx: 1.05, rz: 1.05, yMin: 6.0, yMax: 8.2, needMass: 25, y0: 6.175, y1: 10.075 });
   staticBox(1.7, 0.22, 1.7, 3.3, 6.19, 73.4, MAT.ironDark);      // おもりのかご
   staticBox(1.7, 0.3, 0.08, 3.3, 6.45, 72.55, MAT.ironDark);
   staticBox(1.7, 0.3, 0.08, 3.3, 6.45, 74.25, MAT.ironDark);
@@ -887,14 +1084,14 @@ function buildCourse2() {
   staticBox(0.35, 6.5, 0.35, -1.4, 9.4, 76.2, MAT.orange);       // やぐら
   staticBox(0.35, 6.5, 0.35, 1.4, 9.4, 76.2, MAT.orange);
   staticBox(3.2, 0.3, 0.35, 0, 12.5, 76.2, MAT.orange);
-  addRod([0, 12.35, 76.2], balIdx, 0.04, MAT.ironDark);
+  addRod(tpos(0, 12.35, 76.2), balIdx, 0.04, MAT.ironDark);
   // 力技ルート: 鉄骨ステップ（0.9きざみ）
   staticBox(1.3, 0.28, 1.0, -3.6, 7.2, 74.8, MAT.orange);
   staticBox(1.3, 0.28, 1.0, -3.6, 8.15, 76.0, MAT.orange);
   staticBox(1.3, 0.28, 1.0, -3.6, 9.1, 77.2, MAT.orange);
   staticBox(1.3, 0.28, 1.0, -3.6, 10.0, 78.4, MAT.orange);
 
-  // ── 高層の鉄骨フロア（y10.2, z77.6..87.6） ──
+  // ── 高層の鉄骨フロア（y10.2・りょうルートの合流） ──
   staticBox(7, 0.4, 10, 0, 10.0, 82.6, MAT.concrete);
   staticBox(0.45, 21, 0.45, -3, -0.2, 78.5, MAT.ironDark);
   staticBox(0.45, 21, 0.45, 3, -0.2, 78.5, MAT.ironDark);
@@ -902,23 +1099,45 @@ function buildCourse2() {
   staticBox(0.45, 21, 0.45, 3, -0.2, 86.5, MAT.ironDark);
   trafficCone(2.6, 80, 10.2);
   staticBox(0.5, 0.5, 3.0, 3.0, 10.45, 80, MAT.orange);          // よこづみの鉄骨（かざり）
-  // よじ登り②: 高層フロアのコンテナごえ（1.5m）
+  // よじ登り②: 高層フロアのコンテナごえ（1.5m・合流のさき）
   staticBox(3.5, 1.5, 2.4, -1.75, 10.95, 83.4, MAT.blue);
   staticBox(3.5, 1.5, 2.4, 1.75, 10.95, 83.4, MAT.orange);
 
-  // ── ⑧ ゆれる鉄骨をよけながら せまい梁をわたる（z87.6..93.8） ──
+  /* ═══ 第3章B（近道ルート・ワールド座標): 屋上のコンテナをよじのぼり
+         空中の細い梁づたいに高層フロアへ（すきまとびが2回） ═══ */
+  place(0, 0, 0);
+  staticBox(2.4, 1.5, 2.4, 26.4, 7.05, 25.9, MAT.blue);          // よじ登りコンテナ1（→7.8）
+  staticBox(2.4, 1.5, 2.4, 26.4, 8.55, 23.4, MAT.orange);        // よじ登りコンテナ2（→9.3）
+  trafficCone(25.4, 26.6, 6.3);
+  banner(27.4, 6.3, 26.6, MAT.orange);                           // 分かれ道のめじるし
+  staticBox(2.2, 0.3, 2.2, 29.4, 9.75, 23.2, MAT.orange);        // はりのスタート台
+  staticBox(0.55, 0.28, 9.6, 29.8, 9.76, 17.2, MAT.orange);      // 空中の梁1（z12.4..22）
+  staticBox(0.55, 0.28, 9.4, 29.8, 9.76, 6.1, MAT.orange);       // 梁2（z1.4..10.8・すきま1.6）
+  staticBox(0.55, 0.28, 8.6, 29.8, 9.76, -4.4, MAT.orange);      // 梁3（z-8.7..-0.1・すきま1.5）
+  staticBox(1.8, 0.25, 1.8, 28.6, 10.05, -7.6, MAT.orange);      // 高層フロアへの合流パッド
+
+  /* ═══ よりみち: 休けいデッキの東 おやつのだい（ごほうび） ═══ */
+  staticBox(4.4, 0.22, 0.5, 29.5, 6.19, -2.6, MAT.orange);       // ほそい梁
+  staticBox(3, 0.35, 3, 33.2, 6.12, -2.6, MAT.concrete);         // おやつのだい
+  goldStar(33.2, 6.3, -3.3, 1.0);
+  staticBox(0.8, 0.75, 0.8, 34, 6.67, -1.8, MAT.red);            // じはんき（かざり）
+  trafficCone(32.2, -1.6, 6.3);
+
+  /* ═══ 第4章（西へまがる）: ゆれる鉄骨 → うごく足場 → ゴールの最上階 ═══ */
+  place(108.7, -13, 3);
+  // ── ⑧ ゆれる鉄骨をよけながら せまい梁をわたる ──
   staticBox(0.5, 0.25, 6.2, 0, 10.07, 90.7, MAT.orange);         // せまい梁
   const swingIdx = moverBox([3.6, 0.5, 0.8], [0, 10.75, 90.7], 'x', 2.6, 0.85, 0, MAT.ironDark);
-  addRod([0, 16, 90.7], swingIdx, 0.05, MAT.ironDark);           // つりワイヤー（見た目）
+  addRod(tpos(0, 16, 90.7), swingIdx, 0.05, MAT.ironDark);       // つりワイヤー（見た目）
   staticBox(8, 0.4, 0.5, 0, 16.1, 90.7, MAT.hazard);             // うえのクレーン梁
-  staticBox(7, 0.4, 5.8, 0, 10.0, 96.7, MAT.concrete);           // 着地フロア（z93.8..99.6）
+  staticBox(7, 0.4, 5.8, 0, 10.0, 96.7, MAT.concrete);           // 着地フロア
   staticBox(0.45, 21, 0.45, -3, -0.2, 94.8, MAT.ironDark);
   staticBox(0.45, 21, 0.45, 3, -0.2, 98.6, MAT.ironDark);
 
-  // ── ⑨ うごく足場で大ギャップをわたる（z99.6..109.4） ──
+  // ── ⑨ うごく足場で大ギャップをわたる ──
   moverBox([3, 0.3, 3], [0, 10.05, 104.5], 'z', 3.3, 0.45, 0, MAT.hazard);
 
-  // ── ゴールの最上階（z109.4..115.4） ──
+  // ── ゴールの最上階 ──
   staticBox(7, 0.4, 6, 0, 10.0, 112.4, MAT.concrete);
   staticBox(0.45, 22, 0.45, -3, -0.6, 110.4, MAT.ironDark);
   staticBox(0.45, 22, 0.45, 3, -0.6, 110.4, MAT.ironDark);
@@ -928,36 +1147,102 @@ function buildCourse2() {
   staticBox(0.4, 4, 0.4, 3, 12.3, 114.5, MAT.orange);
   staticBox(6.4, 0.35, 0.4, 0, 14.3, 114.5, MAT.orange);
   trafficCone(-2.4, 111, 10.2);
-  // よじ登り③: ゴールの高台（1.5m）。旗はこのうえ
-  staticBox(7, 1.5, 4, 0, 10.95, 113.4, MAT.concrete);
-  goalFlag(0, 11.7, 113.4);
-  isletDeco(22, 9, 112);
+  // よじ登り③: 最上階の高台（1.5m・フロアはばいっぱい）。ここは中間地点になった
+  staticBox(7, 1.5, 6, 0, 10.95, 113.4, MAT.concrete);
+  banner(0, 11.7, 113.4, MAT.hazard);
+
+  /* ═══ 第5章（延長・北へ→西へL字）: 中継フロア → よじ登りコンテナ → 動く足場 →
+     さらに高いゴールの塔（place は使わずワールド座標。高台 world(-4.7,z-13) の北へつづく） ═══ */
+  place(0, 0, 0);
+  // ⑩ 高台のきたへ 中継フロアAへおりる
+  staticBox(5, 0.4, 5, -4.7, 10.0, -20, MAT.concrete);          // フロアA world z-22.5..-17.5
+  staticBox(0.45, 22, 0.45, -6.6, -0.5, -18.5, MAT.ironDark);
+  staticBox(0.45, 22, 0.45, -6.6, -0.5, -21.5, MAT.ironDark);
+  trafficCone(-3, -18.5, 10.0);
+  // よじ登り④: 資材コンテナのかべ（1.5m・フロアはばいっぱい＝フロアA→フロアB）
+  staticBox(5, 1.5, 0.6, -4.7, 10.95, -22.3, MAT.blue);
+  staticBox(5, 0.4, 4, -4.7, 10.0, -24.5, MAT.concrete);        // フロアB world z-26.5..-22.5
+  staticBox(0.45, 22, 0.45, -6.6, -0.5, -25.5, MAT.ironDark);
+  staticBox(0.5, 0.5, 3, -3.0, 10.45, -24.5, MAT.orange);       // よこづみ鉄骨（かざり）
+  // ⑪ 西へまがる: うごく足場（world -x）でゴールの塔へわたる
+  moverBox([3, 0.3, 3], [-10, 10.05, -24.5], 'x', 2.8, 0.5, 0, MAT.hazard);   // x-12.8..-7.2
+  // ── ゴールの塔屋上（world x-16・らせんの一番たかいところ） ──
+  staticBox(6.5, 0.4, 6, -16, 10.0, -24.5, MAT.concrete);
+  staticBox(0.45, 22, 0.45, -18.5, -0.5, -22.5, MAT.ironDark);
+  staticBox(0.45, 22, 0.45, -18.5, -0.5, -26.5, MAT.ironDark);
+  staticBox(0.45, 22, 0.45, -13.5, -0.5, -22.5, MAT.ironDark);
+  staticBox(0.45, 22, 0.45, -13.5, -0.5, -26.5, MAT.ironDark);
+  staticBox(0.4, 4, 0.4, -18.5, 12.3, -26.6, MAT.orange);
+  staticBox(0.4, 4, 0.4, -13.5, 12.3, -26.6, MAT.orange);
+  staticBox(5.4, 0.35, 0.4, -16, 14.3, -26.6, MAT.orange);
+  trafficCone(-14, -23, 10.0);
+  goalFlag(-16, 10.0, -24.5);
+  // よりみち: ゴールの塔の北 ほしのだい（ごほうび）
+  staticBox(3.5, 0.22, 0.5, -16, 10.19, -28.6, MAT.orange);     // ほそい梁
+  staticBox(3, 0.35, 3, -16, 10.12, -31, MAT.concrete);
+  goldStar(-16, 10.3, -31.7, 1.0);
+
+  /* ═══ ランドマーク: らせんのまんなかにそびえる 大タワークレーン（かざり） ═══ */
+  place(0, 0, 0);
+  {
+    const g = new THREE.Group();
+    const mast = new THREE.Mesh(new THREE.BoxGeometry(1.15, 26, 1.15), MAT.hazard);
+    mast.position.y = 10;
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.5, 1.7), MAT.orange);
+    cab.position.y = 22.6;
+    const jib = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 19), MAT.orange);
+    jib.position.set(0, 23.6, 7.5);
+    const cjib = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 5.5), MAT.orange);
+    cjib.position.set(0, 23.6, -4.2);
+    const weight = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.6, 1.4), MAT.concrete);
+    weight.position.set(0, 22.6, -6.2);
+    const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 9, 4), MAT.ironDark);
+    cable.position.set(0, 18.7, 15.5);
+    const hook = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.9, 0.8), MAT.ironDark);
+    hook.position.set(0, 13.8, 15.5);
+    for (const m of [mast, cab, jib, cjib, weight, cable, hook]) { m.castShadow = true; g.add(m); }
+    g.position.set(12.5, -3, 1);
+    g.rotation.y = 0.85;
+    levelRoot.add(g);
+  }
+  isletDeco(22, [
+    { x0: -32, x1: -18, z0: -12, z1: 30, n: 3, lo: true },       // 西のそら（ひくめ）
+    { x0: 38, x1: 52, z0: -18, z1: 28, n: 3 },                   // 東のそら
+    { x0: 4, x1: 30, z0: 34, z1: 46, n: 3, lo: true },           // 北のそら（ひくめ）
+  ]);
 
   CHECKPOINTS = [
     { x: 0, y: 0.9, z: 0.5 },       // ヤード
     { x: 0, y: 3.9, z: 14 },        // デッキ1
-    { x: 0, y: 3.9, z: 32 },        // デッキ2
-    { x: 0, y: 7.2, z: 45 },        // 屋上
-    { x: 0, y: 7.2, z: 72.8 },      // バランス梁のあとの休けいデッキ
-    { x: 0, y: 11.1, z: 79.5 },     // 高層フロア
-    { x: 0, y: 11.1, z: 95.2 },     // ゆれる鉄骨のあと
-    { x: 0, y: 11.1, z: 110.3 },    // ゴール高台のまえ
+    { x: 9.5, y: 3.9, z: 24 },      // デッキ2（東うで）
+    { x: 22.5, y: 7.2, z: 24 },     // 屋上（分かれ道）
+    { x: 24.6, y: 7.2, z: -1.8 },   // 休けいデッキ（南うで）
+    { x: 24.6, y: 11.1, z: -8.5 },  // 高層フロア（合流）
+    { x: 13.5, y: 11.1, z: -13 },   // ゆれる鉄骨のあと（西うで）
+    { x: -1.6, y: 11.1, z: -13 },   // 最上階（中間地点）
+    { x: -4.7, y: 10.6, z: -20 },   // 中継フロアA
+    { x: -4.7, y: 10.6, z: -24.5 }, // 中継フロアB
   ];
   CP_ZONES = [
     { cp: 1, x0: -3.5, x1: 3.5, z0: 12, z1: 16, yMin: 2.5 },
-    { cp: 2, x0: -3.5, x1: 3.5, z0: 30.5, z1: 34, yMin: 2.5 },
-    { cp: 3, x0: -3.5, x1: 3.5, z0: 43.7, z1: 46, yMin: 5.8 },
-    { cp: 4, x0: -2.75, x1: 2.75, z0: 71, z1: 75, yMin: 5.8 },
-    { cp: 5, x0: -3.5, x1: 3.5, z0: 77.6, z1: 81, yMin: 9.7 },
-    { cp: 6, x0: -3.5, x1: 3.5, z0: 93.8, z1: 96.5, yMin: 9.7 },
-    { cp: 7, x0: -3.5, x1: 3.5, z0: 109.4, z1: 111.2, yMin: 9.7 },
+    { cp: 2, x0: 8, x1: 11.5, z0: 20.5, z1: 27.5, yMin: 2.5 },     // デッキ2
+    { cp: 3, x0: 21.2, x1: 23.5, z0: 20.5, z1: 27.5, yMin: 5.8 },  // 屋上
+    { cp: 4, x0: 21.85, x1: 27.35, z0: -4, z1: 0, yMin: 5.8 },     // 休けいデッキ（ルートA）
+    { cp: 4, x0: 28.9, x1: 30.7, z0: 1.4, z1: 10.8, yMin: 9.3 },   // 空中の梁2（ルートB）
+    { cp: 5, x0: 21.1, x1: 28.1, z0: -10, z1: -6.6, yMin: 9.7 },   // 高層フロア（合流）
+    { cp: 6, x0: 9.1, x1: 14.9, z0: -16.5, z1: -9.5, yMin: 9.7 },  // ゆれる鉄骨のあと
+    { cp: 7, x0: -6.7, x1: -0.7, z0: -16.5, z1: -9.5, yMin: 9.7 }, // 最上階（中間地点）
+    { cp: 8, x0: -7.2, x1: -2.2, z0: -22.5, z1: -17.5, yMin: 9.5 },// 中継フロアA
+    { cp: 9, x0: -7.2, x1: -2.2, z0: -26.5, z1: -22.5, yMin: 9.5 },// 中継フロアB
   ];
-  GOAL = { x0: -3.5, x1: 3.5, z0: 111.6, y: 11.1 };
+  GOAL = { x0: -19.5, x1: -13.2, z0: -28, y: 10.0 };
 }
 
 /* =====================================================================
-   コース3「ゆめのおしろ」— 中世の城（10分規模）
-   くさりで堀こえ → カタパルト → はねばし → 中庭 → 階段/かべのぼりで塔の旗へ
+   コース3「ゆめのおしろ」— 中世の城（10分規模・箱庭化）
+   まんなかにうかぶ古い天守をかこんで 北→東→南とまわる回遊コース。
+   くさり→カタパルト→はねばし→塔→（分岐: 空中さんどう/すいどうばし）
+   →ターザン→つり橋→べっかん→はねばし2→大聖塔の旗へ
    ===================================================================== */
 function buildCourse3() {
   // ── スタートの草原島 ──
@@ -1025,7 +1310,7 @@ function buildCourse3() {
   islandBox(1.4, 1.4, 0.9, 0, 29.3);                              // 堀の中のとび石（くさりのま下ちかく）
   const bridgeIdx = hingedBox(3.2, 0.2, 4.4, MAT.woodDark, 5, [0, 0.12, 31.4], [0, 0, 2.2], [1, 0, 0], 1.22,
     { angularDamping: 0.5, motorForce: 60 });
-  const bridgeChain = chain({ idx: bridgeIdx, local: [0, 0, -2.15] }, 5, 0.45, { grip: true });
+  const bridgeChain = chain({ idx: bridgeIdx, local: [0, 0, -2.15] }, 5, 0.45, { grip: true, noStatic: true });
   GIM.drawbridges.push({ idx: bridgeIdx, upAngle: 1.22, grabIdxs: [...bridgeChain, bridgeIdx], open: false });
 
   // ── おしろの島（z31.4..58.4） ──
@@ -1071,11 +1356,21 @@ function buildCourse3() {
   crenels(0, 7.47, 52.15, 5.6, 'x');                              // 塔の屋上のふち
   crenels(0, 7.47, 57.85, 5.6, 'x');
   crenels(-2.85, 7.47, 55, 5.6, 'z');
-  crenels(2.85, 7.47, 55, 5.6, 'z');
+  crenels(2.85, 7.47, 52.7, 1.4, 'z');   // ひがしのふちは まんなかをあけて ルートAの出口に
+  crenels(2.85, 7.47, 57.3, 1.4, 'z');
 
   banner(-2.2, 7.2, 53.4, MAT.red); banner(2.2, 7.2, 53.4, MAT.blue);   // 塔1は中間地点
 
-  // ── ⑤ うらの空中さんどう: 柱とびで下りていく（z58..70） ──
+  /* ここが分かれ道: 塔1のうえから ひがしへ2ルート（あか=うき石の空中さんどう / あお=すいどうばし） */
+  staticBox(2.2, 0.24, 1.7, 5.1, 6.73, 55, MAT.stone);            // ルートA: うき石レッジ（ひろめ）
+  staticBox(1.5, 0.24, 1.5, 7.9, 6.58, 55, MAT.stone);
+  banner(5.4, 6.85, 54.0, MAT.red);
+  staticBox(2.0, 0.25, 2.0, 2.2, 6.9, 59.6, MAT.stone);           // ルートB: きたのパッド
+  banner(1.1, 7.03, 60.3, MAT.blue);
+
+  /* ═══ 第2章（ひがしへまがる）: 空中さんどう/すいどうばし → ターザン → つり橋 → べっかん ═══ */
+  place(-50, 55, 1);
+  // ── ⑤A ルートA: 柱とびの空中さんどうで下りていく ──
   const pillar = (x, top, z) => {
     staticBox(1.7, 0.4, 1.7, x, top - 0.2, z, MAT.stone);
     staticBox(0.75, 9, 0.75, x, top - 4.9, z, MAT.stoneDark);
@@ -1084,23 +1379,35 @@ function buildCourse3() {
   pillar(1.4, 6.1, 63.4);
   pillar(-1.2, 5.5, 66);
   pillar(0.6, 4.9, 68.4);
-  staticBox(4, 0.4, 6, 0, 4.4, 73.4, MAT.stone);                 // 列柱ろうか1（z70.4..76.4 上面4.6）
-  staticBox(0.75, 9, 0.75, -1.4, 0, 73.4, MAT.stoneDark);
-  staticBox(0.75, 9, 0.75, 1.4, 0, 73.4, MAT.stoneDark);
-  crenels(-1.85, 4.87, 73.4, 5.6, 'z'); crenels(1.85, 4.87, 73.4, 5.6, 'z');
+  staticBox(4, 0.4, 6, 0, 4.4, 73.0, MAT.stone);                 // 列柱ろうか1（上面4.6）
+  staticBox(0.75, 9, 0.75, -1.4, 0, 73.0, MAT.stoneDark);
+  staticBox(0.75, 9, 0.75, 1.4, 0, 73.0, MAT.stoneDark);
+  crenels(-1.85, 4.87, 73.0, 5.6, 'z'); crenels(1.85, 4.87, 73.0, 5.6, 'z');
 
-  // ── ⑥ くさりターザンで大堀をわたる（z76.4..81.4） ──
-  staticBox(1.6, 0.3, 1.2, 0, 4.75, 75.7, MAT.stone);            // ふみ切り台
+  // ── ⑥ くさりターザンで大堀をわたる（ルートAのやま場） ──
+  staticBox(1.6, 0.3, 1.2, 0, 5.2, 75.7, MAT.stone);             // ふみ切り台（たかめ: とびついてつかむ）
   staticBox(0.6, 14, 0.6, -2.6, 4, 78.9, MAT.stoneDark);
   staticBox(0.6, 14, 0.6, 2.6, 4, 78.9, MAT.stoneDark);
   staticBox(5.6, 0.45, 0.6, 0, 10.8, 78.9, MAT.woodDark);
-  chain({ anchor: [0, 10.6, 78.9] }, 8, 0.55, { grip: true });
-  staticBox(4, 0.4, 4, 0, 4.4, 83.4, MAT.stone);                 // 列柱ろうか2（z81.4..85.4）
-  staticBox(0.75, 9, 0.75, 0, 0, 83.4, MAT.stoneDark);
+  chain({ anchor: [0, 10.6, 78.9] }, 10, 0.55, { grip: true });   // 長め: とびついてつかみやすく
+  staticBox(4, 0.4, 5, 0, 4.4, 82.9, MAT.stone);                 // 列柱ろうか2（ごうりゅう・ひろめ）
+  staticBox(0.75, 9, 0.75, 0, 0, 82.9, MAT.stoneDark);
+
+  // ── ⑤B ルートB: すいどうばし（アーチの石橋）。すきまとび2回で ろうか2へ ──
+  const aqSpan = (zc, len, top) => {
+    staticBox(2.0, 0.55, len, -6, top - 0.275, zc, MAT.stone);
+    crenels(-6.82, top, zc, len - 0.6, 'z');                     // きたがわの手すり
+    staticBox(0.85, 8, 0.85, -6, top - 4.55, zc - len / 2 + 0.7, MAT.stoneDark);
+    staticBox(0.85, 8, 0.85, -6, top - 4.55, zc + len / 2 - 0.7, MAT.stoneDark);
+  };
+  aqSpan(57, 10, 6.85);
+  aqSpan(68.1, 9.8, 6.55);                                       // すきま1.2
+  aqSpan(78.6, 9.6, 6.25);                                       // すきま0.8
+  staticBox(1.4, 0.24, 1.4, -3.7, 5.28, 83.4, MAT.stone);        // 段さがり → ろうか2
 
   // ── ⑦ 朽ちたつり橋 → べっかんの島 ──
   hangingBridge(0, 4.3, 85.4, 91.4, 2.4, 4, MAT.woodDark);
-  islandBox(18, 16, 0, 4.2, 99.4, MAT.grass);                    // べっかんの島（z91.4..107.4）
+  islandBox(18, 16, 0, 4.2, 99.4, MAT.grass);                    // べっかんの島
   tree(-6.5, 94, 4.2, 1.0); banner(6.5, 4.2, 93.5, MAT.red);
   // べっかんの城壁と 落とし格子（床スイッチ＋木箱でひらく）
   wallZ(98.4, -9, 9, 4.2, 4.6, MAT.stone, [{ x0: -1.6, x1: 1.6, y0: 4.2, y1: 7.5 }], 0.7);
@@ -1110,20 +1417,23 @@ function buildCourse3() {
   dynBox(0.72, 0.72, 0.72, -3.2, 4.75, 95, MAT.crate, 12, { noSleep: true });
   dynBox(0.72, 0.72, 0.72, -4, 4.75, 95.9, MAT.crate, 12, { noSleep: true });
   tree(5.5, 101, 4.2, 0.9);
-  // よじ登り②: くずれた基壇の二段のぼり（1.4m→1.3mの連続。おりた先がはねばし2）
-  staticBox(18, 1.4, 3.2, 0, 4.9, 104.6, MAT.stone);             // 一段め（上面5.6）
-  staticBox(18, 1.3, 1.6, 0, 6.25, 105.4, MAT.stone);            // 二段め（上面6.9）
-  banner(-6, 6.9, 105.4, MAT.blue);
+  // よじ登り②: くずれた基壇の二段のぼり（1.4m→1.3mの連続。こえた先が はねばし2）
+  staticBox(18, 1.5, 3.2, 0, 4.95, 104.6, MAT.stone);            // 一段め（上面5.7）
+  staticBox(18, 1.3, 1.6, 0, 6.35, 105.4, MAT.stone);            // 二段め（上面7.0）
+  banner(-6, 7.0, 105.4, MAT.blue);
 
-  // ── ⑧ さいごのはねばし（堀 z107.4..112.2）: くさりをつかんでひきおろす ──
-  islandBox(1.4, 1.4, 0.9, 4.1, 110);                            // 堀のとび石
-  const b2 = hingedBox(3.2, 0.2, 4.9, MAT.woodDark, 5, [0, 4.34, 112.2], [0, 0, 2.45], [1, 0, 0], 1.22,
+  /* ═══ 第3章（みなみへまがる）: はねばし2 → 大聖塔の島 ═══ */
+  place(56, 153.4, 2);
+  // ── ⑧ さいごのはねばし（堀）: くさりをつかんでひきおろす ──
+  islandBox(1.4, 1.4, -1.15, 4.1, 110);                          // 堀のとび石
+  // 橋は基壇ごしのルートの先（島のひがしのおび）に下りる
+  const b2 = hingedBox(2.2, 0.2, 4.9, MAT.woodDark, 5, [-1.3, 4.34, 112.2], [0, 0, 2.45], [1, 0, 0], 1.22,
     { angularDamping: 0.5, motorForce: 60 });
-  const b2chain = chain({ idx: b2, local: [0, 0, -2.4] }, 6, 0.45, { grip: true });
+  const b2chain = chain({ idx: b2, local: [0, 0, -2.4] }, 6, 0.45, { grip: true, noStatic: true });
   GIM.drawbridges.push({ idx: b2, upAngle: 1.22, grabIdxs: [...b2chain, b2], open: false });
 
   // ── ⑨ 大聖塔の島: 階段の正攻法＋かべのぼりの力技 ──
-  islandBox(16, 16, 0, 4.2, 120.4, MAT.grass);                   // z112.4..128.4
+  islandBox(16, 16, 0, 4.2, 120.4, MAT.grass);
   banner(-5, 4.2, 113.2, MAT.red); banner(5, 4.2, 113.2, MAT.blue);
   // よじ登り③: 大聖塔まえのくずれた城壁（1.5m・島のはば全体）
   staticBox(16, 1.5, 0.8, 0, 4.95, 114.4, MAT.stoneDark);
@@ -1140,11 +1450,66 @@ function buildCourse3() {
   crenels(0, 10.47, 119.35, 6.1, 'x'); crenels(0, 10.47, 125.45, 6.1, 'x');
   crenels(-3.05, 10.47, 122.4, 6.1, 'z'); crenels(3.05, 10.47, 122.4, 6.1, 'z');
   const spire = new THREE.Mesh(new THREE.ConeGeometry(1.1, 1.8, 6), MAT.roof);
-  spire.position.set(-2.2, 11.1, 124.6);
+  spire.position.set(...tpos(-2.2, 11.1, 124.6));
   spire.castShadow = true;
   levelRoot.add(spire);
-  goalFlag(0, 10.2, 122.4);                                      // ゴール: 大聖塔の旗
-  isletDeco(33, 11, 124);
+  banner(0, 10.2, 122.4, MAT.gold);                              // 大聖塔てっぺん＝見晴らしの中間地点
+  goldStar(0, 10.2, 120.6, 1.0);                                 // てっぺんのごほうび
+
+  /* ═══ 第4章（延長・大聖塔島から西へおりる）: とび石の下り → 隠れ里の城壁のぼり
+     → 大鳥居のゴール（place は使わずワールド座標。大聖塔島 world(x48..64,z25..41) の西へ） ═══ */
+  place(0, 0, 0);
+  // ⑩ 大聖塔島の西(world x48)から とび石で 西へおりていく
+  islandBox(3.5, 4, 46, 3.0, 36);                                // とび石1 x44.25..47.75, z34..38, y3
+  islandBox(3.5, 4, 42, 1.6, 36);                                // とび石2 x40.25..43.75, z34..38, y1.6
+  islandBox(8, 10, 34.5, 0.4, 36, MAT.grass);                    // 隠れ里の島 x30.5..38.5, z31..41, y0.4
+  tree(37, 39, 0.4, 0.9); banner(37.5, 0.4, 33, MAT.blue);
+  // よじ登り④: 隠れ里の城壁（1.5m・島のたてはばいっぱい・こえた先がゴール）
+  staticBox(0.5, 1.5, 10, 34, 1.15, 36, MAT.stoneDark);          // x33.75..34.25, z31..41
+  staticBox(0.62, 0.12, 10.2, 34, 1.91, 36, MAT.stone);
+  // ⑪ ゴール: 隠れ里の大鳥居
+  staticBox(0.35, 3.0, 0.35, 32.0, 1.5, 34.0, MAT.red);          // 鳥居のはしら
+  staticBox(0.35, 3.0, 0.35, 32.0, 1.5, 38.0, MAT.red);
+  staticBox(4.6, 0.4, 0.4, 32.0, 3.15, 34.0, MAT.red);           // かさぎ
+  staticBox(4.6, 0.4, 0.4, 32.0, 3.15, 38.0, MAT.red);
+  staticBox(0.4, 0.4, 4.4, 32.0, 2.7, 36.0, MAT.red);            // ぬき
+  tree(31, 40, 0.4, 0.85); tree(31, 32.5, 0.4, 0.85);
+  goalFlag(32, 0.4, 36);
+  place(56, 153.4, 2);                                           // よりみちのため 大聖塔フレームへもどす
+
+  /* ═══ よりみち: 大聖塔のみなみ ほしの小島（ごほうび） ═══ */
+  islandBox(1.5, 1.5, -2.6, 3.4, 130.4);                         // とび石
+  islandBox(1.5, 1.5, -3.6, 2.8, 133);
+  islandBox(5.5, 4.5, -3.6, 2.2, 136.4);                         // ほしの小島
+  goldStar(-3.6, 2.2, 137.2, 1.2);
+  banner(-5.6, 2.2, 135.6, MAT.red);
+  bounceShroom(-1.6, 3.0, 131.6, 10);                            // きのこで島へもどる
+
+  /* ═══ ランドマーク: 回遊のまんなかにうかぶ 古い天守の島（かざり） ═══ */
+  place(0, 0, 0);
+  islandBox(11, 11, 28, -1.2, 24);
+  staticBox(4.2, 8.5, 4.2, 28, 3.05, 24, MAT.stone);             // 天守（上面7.3）
+  staticBox(5.4, 0.5, 5.4, 28, 7.55, 24, MAT.stoneDark);         // はりだしの屋上
+  crenels(28, 7.8, 21.5, 5.0, 'x'); crenels(28, 7.8, 26.5, 5.0, 'x');
+  crenels(25.5, 7.8, 24, 5.0, 'z'); crenels(30.5, 7.8, 24, 5.0, 'z');
+  {
+    const keepRoof = new THREE.Mesh(new THREE.ConeGeometry(2.7, 2.3, 6), MAT.roof);
+    keepRoof.position.set(28, 9.35, 24);
+    keepRoof.castShadow = true;
+    levelRoot.add(keepRoof);
+  }
+  staticBox(2.0, 3.2, 2.0, 32.2, 0.4, 20.6, MAT.stoneDark);      // くずれた小塔
+  staticBox(0.9, 1.6, 3.0, 24.2, -0.4, 27.4, MAT.stoneDark);     // かべのあと
+  tree(31.6, 27.2, -1.2, 1.0); tree(24.4, 20.8, -1.2, 0.85);
+  banner(26.2, 8.05, 22.3, MAT.red);
+  balloon(13, 12.5, 36, 1.35, MAT.red);
+  balloon(68, 12, 60, 1.05, MAT.blue);
+  isletDeco(33, [
+    { x0: -30, x1: -17, z0: -2, z1: 48, n: 3 },                  // にしのそら
+    { x0: 2, x1: 42, z0: -28, z1: -13, n: 3, lo: true },         // みなみのそら（ひくめ）
+    { x0: 70, x1: 84, z0: 6, z1: 50, n: 3 },                     // ひがしのそら
+    { x0: 4, x1: 34, z0: 72, z1: 84, n: 2, lo: true },           // きたのそら（ひくめ）
+  ]);
 
   CHECKPOINTS = [
     { x: 0, y: 0.9, z: 0.5 },        // スタート
@@ -1152,24 +1517,27 @@ function buildCourse3() {
     { x: 0, y: 0.9, z: 33.5 },       // 城門のなか
     { x: 0, y: 0.9, z: 37.5 },       // 中庭
     { x: -7.4, y: 5.1, z: 47 },      // 城壁の通路
-    { x: 0, y: 8.1, z: 55 },         // 塔1のてっぺん
-    { x: 0, y: 5.5, z: 72.5 },       // 列柱ろうか1
-    { x: 0, y: 5.5, z: 83.3 },       // 列柱ろうか2
-    { x: 0, y: 5.1, z: 100.3 },      // べっかんの中庭
-    { x: 0, y: 5.1, z: 114 },        // 大聖塔の島
+    { x: 0, y: 8.1, z: 55 },         // 塔1のてっぺん（分かれ道）
+    { x: 22.5, y: 5.5, z: 55 },      // 列柱ろうか1
+    { x: 33.4, y: 5.5, z: 55 },      // 列柱ろうか2（ごうりゅう）
+    { x: 50.4, y: 5.1, z: 55 },      // べっかんの中庭
+    { x: 56, y: 5.1, z: 40.2 },      // 大聖塔の島のいりぐち
+    { x: 36, y: 1.0, z: 36 },        // 隠れ里の島（大聖塔の西）
   ];
   CP_ZONES = [
     { cp: 1, x0: -8, x1: 8, z0: 13, z1: 17, yMin: -0.5 },
     { cp: 2, x0: -2, x1: 2, z0: 31.5, z1: 35, yMin: -0.5 },
     { cp: 3, x0: -6, x1: 6, z0: 35.5, z1: 39.5, yMin: -0.5 },
     { cp: 4, x0: -9.1, x1: -5.7, z0: 45.5, z1: 52, yMin: 3.7 },
-    { cp: 5, x0: -3, x1: 3, z0: 52.3, z1: 57.7, yMin: 6.6 },
-    { cp: 6, x0: -2, x1: 2, z0: 70.5, z1: 74.5, yMin: 4.0 },
-    { cp: 7, x0: -2, x1: 2, z0: 81.5, z1: 85.2, yMin: 4.0 },
-    { cp: 8, x0: -3, x1: 3, z0: 98.8, z1: 102, yMin: 3.7 },
-    { cp: 9, x0: -6, x1: 6, z0: 112.5, z1: 114.0, yMin: 3.7 },
+    { cp: 5, x0: -3, x1: 3, z0: 52.3, z1: 57.7, yMin: 6.6 },       // 塔1のてっぺん
+    { cp: 6, x0: 20.0, x1: 26.0, z0: 53, z1: 57, yMin: 4.0 },      // ろうか1（ルートA）
+    { cp: 6, x0: 13.2, x1: 23, z0: 60, z1: 62, yMin: 5.9 },        // すいどうばし（ルートB）
+    { cp: 7, x0: 30.4, x1: 35.4, z0: 53, z1: 57, yMin: 4.0 },      // ろうか2（ごうりゅう）
+    { cp: 8, x0: 48.8, x1: 52.6, z0: 47, z1: 63, yMin: 3.7 },      // べっかんの中庭
+    { cp: 9, x0: 50, x1: 62, z0: 39.4, z1: 41.2, yMin: 3.7 },      // 大聖塔の島のいりぐち
+    { cp: 10, x0: 34.25, x1: 38.5, z0: 31, z1: 41, yMin: -0.5 },   // 隠れ里の島（城壁の手前）
   ];
-  GOAL = { x0: -3.3, x1: 3.3, z0: 119.4, y: 9.6 };
+  GOAL = { x0: 29, x1: 34, z0: 30, y: 0 };
 }
 
 /* =====================================================================
@@ -1178,16 +1546,16 @@ function buildCourse3() {
 // 各コースの build() が CHECKPOINTS / CP_ZONES / GOAL を設定する
 const COURSES = [
   {
-    name: '🏠 ゆめのおうち', desc: 'はじめてのゆめ。ドア・ボタン・はこ運びをおぼえよう',
-    build: buildCourse1, cam: { x: 0, z: 50, r: 52 },
+    name: '🏠 ゆめのおうち', desc: 'はじめてのゆめ。ドア・ボタン・はこ運び。分かれ道とほしの島も',
+    build: buildCourse1, cam: { x: 26, z: 27, r: 48 },
   },
   {
-    name: '🏗️ こうじげんば', desc: 'リフトと鉄球で こうじ中のビルのてっぺんへ',
-    build: buildCourse2, cam: { x: 0, z: 54, r: 56 },
+    name: '🏗️ こうじげんば', desc: '大クレーンのまわりを ぐるっとらせんにのぼる こうじ中のビル',
+    build: buildCourse2, cam: { x: 11, z: 5, r: 42 },
   },
   {
-    name: '🏰 ゆめのおしろ', desc: 'カタパルトと はねばしをこえて 塔の旗をめざせ',
-    build: buildCourse3, cam: { x: 0, z: 60, r: 62 },
+    name: '🏰 ゆめのおしろ', desc: 'おしろのまわりを ひとまわり。はねばしをこえて大聖塔の旗へ',
+    build: buildCourse3, cam: { x: 25, z: 30, r: 58 },
   },
 ];
 let courseIdx = -1;
@@ -1215,6 +1583,9 @@ function buildLevel(idx) {
   GIM.drawbridges = [];
   GIM.catapults = [];
   GIM.breakables = [];
+  GIM.stars = [];
+  GIM.floaters = [];
+  place(0, 0, 0);   // 配置トランスフォームをリセット
   courseIdx = idx;
   // build() が CHECKPOINTS / CP_ZONES / GOAL を直接セットする
   COURSES[idx].build();
@@ -1607,9 +1978,10 @@ function initPhysics() {
       position: new CANNON.Vec3(s.x, s.y, s.z),
       collisionFilterGroup: GROUP_WORLD,
     });
-    if (s.rotX) body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), s.rotX);
-    if (s.rotY) body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), s.rotY);
-    if (s.rotZ) body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), s.rotZ);
+    if (s.quat) body.quaternion.set(...s.quat);        // 配置ヨーとの合成回転
+    else if (s.rotX) body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), s.rotX);
+    else if (s.rotY) body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), s.rotY);
+    else if (s.rotZ) body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), s.rotZ);
     if (s.belt) body.beltVel = new CANNON.Vec3(...s.belt);      // ベルトコンベア
     if (s.bounce) body.bouncePad = s.bounce;                    // トランポリン
     world.addBody(body);
@@ -1636,6 +2008,8 @@ function initPhysics() {
     body.sleepSpeedLimit = 0.3;
     body.sleepTimeLimit = 0.8;
     if (o.spin !== undefined) { body.spin = o.spin; body.spinCenter = o.spinCenter; } // 回転床
+    // はねばしのくさりなど: 地形とぶつからない（すきまにはさまって橋が閉じ切らないのを防ぐ）
+    if (o.noStatic) body.collisionFilterMask = -1 & ~GROUP_WORLD;
     world.addBody(body);
     o.body = body;
 
@@ -1655,9 +2029,9 @@ function initPhysics() {
       world.addBody(anchor);
       const c = new CANNON.HingeConstraint(anchor, body, {
         pivotA: new CANNON.Vec3(0, 0, 0),
-        axisA: new CANNON.Vec3(...o.hinge.axis),
+        axisA: new CANNON.Vec3(...o.hinge.axis),                        // ワールド軸
         pivotB: new CANNON.Vec3(...o.hinge.localPivot),
-        axisB: new CANNON.Vec3(...o.hinge.axis),
+        axisB: new CANNON.Vec3(...(o.hinge.axisLocal || o.hinge.axis)), // ボディローカル軸
       });
       if (o.hinge.motorForce) {
         c.enableMotor();
@@ -1699,6 +2073,7 @@ function initPhysics() {
   for (const pb of GIM.plankBridges || []) {
     const anchorBody = (p) => {
       const a = new CANNON.Body({ mass: 0, position: new CANNON.Vec3(...p), collisionFilterGroup: GROUP_WORLD, collisionFilterMask: 0 });
+      if (pb.q) a.quaternion.set(...pb.q);   // 橋の向きにあわせる（拘束ローカル点のため）
       world.addBody(a);
       return a;
     };
@@ -1816,7 +2191,12 @@ function stepGimmicks() {
     lf.moved = true;
     const lever = dynObjects[lf.leverIdx].body;
     const rest = lf.target === lf.y1 ? 0.45 : -0.45;
-    lever.torque.x += (rest - a) * 4 - lever.angularVelocity.x * 0.5;
+    const lax = dynObjects[lf.leverIdx].hinge.axis;    // ワールドのヒンジ軸まわりにばね
+    const lw = lever.angularVelocity;
+    const lt = (rest - a) * 4 - (lw.x * lax[0] + lw.y * lax[1] + lw.z * lax[2]) * 0.5;
+    lever.torque.x += lax[0] * lt;
+    lever.torque.y += lax[1] * lt;
+    lever.torque.z += lax[2] * lt;
     driveY(lf.liftIdx, lf.target, lf.speed || 1.1);
   }
 
@@ -1865,7 +2245,7 @@ function stepGimmicks() {
       }
       const target = pulled ? 0 : db.upAngle;
       hinge.setMotorSpeed(-clamp((target - th) * 2.5, pulled ? 0.85 : 0.4));
-      if (th < 0.15) {
+      if (th < 0.28) {   // ここまで引きおろせば もう閉じない（モーターが最後まで倒す）
         db.open = true;
         announce(null, 'gate'); // 効果音のみ
       }
@@ -2288,9 +2668,9 @@ class Doll {
       }
     }
 
-    // ── よじのぼり（本家式・連続の力のみ。テレポート/位置直接セットは使わない）:
-    //    上を見て掴む → 下を見ながら前進 → 引き寄せ力で体が上がる →
-    //    縁の高さに近づいたら上+前へ押し込み、ひざから縁に乗り上げる（1〜2秒の連続モーション）
+    // ── よじのぼり（本家式・完全にプレイヤー入力駆動）:
+    //    上を見て掴む → 「下を見る × 前進入力」の間だけ じわじわ体が持ち上がる。
+    //    入力を離すと力は即ゼロ（慣性のみ残る）→ ぶら下がりにもどる。自動では登らない
     this.climbing = false;
     if (!limp) {
       const pull = Math.min(1, Math.max(0, (0.15 - vp) / 0.85)); // 下をむくほど1（vp<0.15で効きはじめ）
@@ -2298,7 +2678,8 @@ class Doll {
       const ml = Math.hypot(inp.x, inp.z);
       if (ml > 0.15) { fx = inp.x / ml; fz = inp.z / ml; }
       else { const f = torso.quaternion.vmult(new CANNON.Vec3(0, 0, 1)); fx = f.x; fz = f.z; }
-      const fwdBoost = ml > 0.15 ? 1 : 0.45; // 前進入力で引きあげが強まる
+      // 駆動 = カメラ下向き度 × 前進入力の強さ。どちらかが無ければ 0 ＝ 登らない
+      const drive = pull * (ml > 0.15 ? Math.min(1, ml) : 0);
       for (const s of this.sides) {
         if (!s.grabC || !s.holdC) continue;
         // 動的オブジェクト（木箱・岩・他プレイヤーなど）を掴んでいるあいだは
@@ -2308,42 +2689,43 @@ class Doll {
         if (held.type === CANNON.Body.DYNAMIC) continue;
         const hp = s.body.position;
         const hy = hp.y;
-        if (hy > torso.position.y - 0.75) {          // つかまり中〜乗り上げ中（体が手+0.75上まで）
+        if (hy > torso.position.y - 1.0) {           // つかまり中〜乗り上げ中（体が手+1.0上まで）
           this.climbing = true;
-          const rise = torso.position.y - hy;                    // 縁(手)にたいする体の高さ
-          const vault = pull > 0.4 && ml > 0.15 && rise > -0.45; // 乗り上げフェーズ
+          const rise = torso.position.y - hy;                // 縁(手)にたいする体の高さ
+          const vault = drive > 0.25 && rise > -0.45;        // 乗り上げも入力継続が条件
           if (vault) {
-            // 乗り上げ中はホールドをゆるめ、体が手より上へ抜けられるようにする
-            s.holdC.distance += (0.8 - s.holdC.distance) * 0.25;
+            // 乗り上げ中はロープをくり出すように駆動量に比例して距離をのばす（~0.7m/s・上限0.85）。
+            // 距離一致型の拘束なので「のばした分だけ」体が縁の上へ動ける＝入力がなければのびない
+            s.holdC.distance = Math.min(0.85, s.holdC.distance + 0.012 * drive);
           } else {
-            // ホールド距離: 下をむくほど短く＝体が手にひきよせられる
-            const targetDist = 0.72 - pull * fwdBoost * 0.5;     // 0.72(ぶらさがり)〜0.22(ひきあげ)
-            s.holdC.distance += (targetDist - s.holdC.distance) * 0.3;
+            // ホールド距離: 駆動中だけ じわじわ短く（もっさり）。入力をやめると0.72へもどる＝ぶら下がり
+            const targetDist = 0.72 - drive * 0.5;
+            s.holdC.distance += (targetDist - s.holdC.distance) * (0.03 + 0.05 * drive);
           }
-          if (pull > 0.05 && torso.velocity.y < 3.0 && rise < 0.1) {
-            // 胴体を拘束点方向へ引き寄せる連続的な力（上限クランプつき）
+          if (drive > 0.05 && torso.velocity.y < 0.6 && rise < 0.1) {
+            // 拘束点方向への引き寄せ（駆動量に比例・上限クランプ・上昇0.6m/sまで＝もっさり）
             const dx = hp.x - torso.position.x, dy = hy - torso.position.y, dz = hp.z - torso.position.z;
             const dl = Math.hypot(dx, dy, dz) || 1;
-            const F = Math.min(torso.mass * -GRAVITY * (1.1 + 1.6 * pull * fwdBoost), torso.mass * 32);
+            const F = Math.min(torso.mass * -GRAVITY * (0.4 + 1.1 * drive), torso.mass * 24);
             torso.force.x += (dx / dl) * F * 0.5;
             torso.force.y += Math.max(0.25, dy / dl) * F;
             torso.force.z += (dz / dl) * F * 0.5;
           }
           if (vault) {
-            // 上へ: 縁+0.6までもち上げつづける（速度上限つき→1ステップの移動は数cm＝すり抜けない）
-            if (rise < 0.6 && torso.velocity.y < 2.4) {
-              torso.force.y += torso.mass * -GRAVITY * 1.9;
+            // 上へ: 駆動量に比例（上昇0.8m/sまで→1ステップ~1cm＝すり抜けない）。入力をやめれば止まる
+            if (rise < 0.8 && torso.velocity.y < 0.8) {
+              torso.force.y += torso.mass * -GRAVITY * 1.6 * drive;
             }
-            // 前へ: 縁をこえるほど強く押し込み、ひざから乗り上げる（速度上限つき）
+            // 前へ: 縁をこえるほど強く・駆動量に比例（前進1.3m/sまで）
             const fSpd = torso.velocity.x * fx + torso.velocity.z * fz;
-            if (fSpd < 2.2) {
-              const push = torso.mass * (7 + 11 * Math.min(1, Math.max(0, rise + 0.25)));
+            if (fSpd < 1.3) {
+              const push = torso.mass * (5 + 8 * Math.min(1, Math.max(0, rise + 0.25))) * drive;
               torso.force.x += fx * push;
               torso.force.z += fz * push;
             }
-            // のぼり切ったら手をはなす（勢いはそのまま＝連続運動で縁の上に着地）。
+            // 体の下端が縁をこえたら手をはなす（勢いはそのまま＝連続運動で縁の上に着地）。
             // 直後はこの縁の近傍への再グラブを抑止（tryGrab側で判定）→ 掴みなおし連発を防ぐ
-            if (rise > 0.45) {
+            if (rise > 0.72) {
               s.avoid = { x: hp.x, y: hy, z: hp.z, until: simT + 1.5 };
               this.releaseSide(s);
               s.cool = simT + 0.6;
@@ -3151,6 +3533,8 @@ function animate(now) {
     menuCam(now);
   }
   updateRods();
+  for (const st of GIM.stars) st.rotation.y = now * 0.0012;                          // ごほうびの星
+  for (const fl of GIM.floaters) fl.g.position.y = fl.y0 + Math.sin(now * 0.00042 + fl.ph) * 0.8; // 気球
   beltTex.offset.y -= dt * 0.7; // ベルトのながれ
   if (waterSurf) waterSurf.position.y = WATER_Y + Math.sin(now * 0.0011) * 0.05; // 水面のゆらぎ（見た目だけ）
   renderer.render(scene, camera);
@@ -3166,37 +3550,3 @@ setInterval(() => {
   }
 }, 150);
 
-/* デバッグ用フック（動作確認テストで使用） */
-window.__dbg = {
-  get state() { return state; },
-  get isHost() { return isHost; },
-  get myId() { return myId; },
-  get metas() { return metas; },
-  get dolls() { return dolls; },
-  get rigs() { return rigs; },
-  get snaps() { return snaps; },
-  get objs() { return dynObjects; },
-  get gim() { return GIM; },
-  get skin() { return mySkin; },
-  get course() { return courseIdx; },
-  get checkpoints() { return CHECKPOINTS; },
-  get zones() { return CP_ZONES; },
-  get goal() { return GOAL; },
-  tp(x, y, z) { const d = dolls.get(myId); if (d) { d.torso.position.set(x, y, z); d.torso.velocity.setZero(); for (const s of d.sides) { s.body.position.set(x + 0.45 * s.sx, y, z); s.body.velocity.setZero(); } } },
-  get sndLog() { return Sound.log; },
-  clearSnd() { Sound.log.length = 0; },
-  muted() { return Sound.isMuted(); },
-  hingeAngle,
-  pos() {
-    const rig = rigs.get(myId);
-    return rig ? rig.group.position.toArray() : null;
-  },
-  pressKey(code) { keys.add(code); },
-  releaseKey(code) { keys.delete(code); },
-  jump() { jumpCount++; },
-  setGrab(v) { keyGrab = v; },
-  setGrabL(v) { mouseGrabL = v; },
-  setGrabR(v) { mouseGrabR = v; },
-  setPitch(v) { camPitch = v; },
-  setYaw(y) { camYaw = y; },
-};
